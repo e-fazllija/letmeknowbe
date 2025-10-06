@@ -10,28 +10,27 @@ export class UserService {
 
   async create(dto: CreateUserDto) {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-    return this.prisma.user.create({
+    return this.prisma.internalUser.create({
       data: { ...dto, password: hashedPassword },
     });
   }
 
   findAll() {
-    return this.prisma.user.findMany();
+    return this.prisma.internalUser.findMany();
   }
 
   findOne(id: string) {
-    return this.prisma.user.findUnique({ where: { id } });
+    return this.prisma.internalUser.findUnique({ where: { id } });
   }
 
   async update(id: string, dto: UpdateUserDto) {
-    return this.prisma.user.update({
+    return this.prisma.internalUser.update({
       where: { id },
       data: dto,
     });
   }
 
   remove(id: string) {
-    return this.prisma.user.delete({ where: { id } });
+    return this.prisma.internalUser.delete({ where: { id } });
   }
 }
- 
