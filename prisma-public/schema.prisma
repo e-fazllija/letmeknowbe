@@ -33,26 +33,27 @@ enum EmployeeRange {
   DA_201_A_250
   OLTRE_250
 }
- 
+// CLIENT (azienda)
 model Client {
   id            String          @id @default(cuid())
-  companyName   String          @unique                 // ragione sociale
-  contactEmail  String          @unique                 // email principale
-  status        String          @default("ACTIVE")      // stato iscrizione
+  companyName   String
+  contactEmail  String
+  status        String          @default("ACTIVE")
   employeeRange EmployeeRange
   subscriptions Subscription[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
 }
- 
+
+// ABBONAMENTI
 model Subscription {
   id        String           @id @default(cuid())
   clientId  String
   client    Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  amount    Decimal          @db.Decimal(10,2)          // importo in euro
+  amount    Decimal          @db.Decimal(10,2)
   currency  String           @default("EUR")
   plan      SubscriptionPlan
   method    PaymentMethod
-  status    String           @default("SUCCESS")        // SUCCESS, PENDING, FAILED
+  status    String           @default("SUCCESS")
   createdAt DateTime         @default(now())
 }

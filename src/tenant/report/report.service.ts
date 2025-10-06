@@ -11,7 +11,7 @@ export class ReportService {
   createReport(dto: CreateReportDto) {
     return this.prisma.whistleReport.create({
       data: {
-        tenantId: dto.tenantId,
+        clientId: dto.clientId,
         title: dto.title,
         summary: dto.summary,
         status: dto.status,
@@ -22,9 +22,9 @@ export class ReportService {
     });
   }
 
-  listReports(tenantId: string) {
+  listReports(clientId: string) {
     return this.prisma.whistleReport.findMany({
-      where: { tenantId },
+      where: { clientId },
       include: { messages: true, statusLogs: true },
     });
   }

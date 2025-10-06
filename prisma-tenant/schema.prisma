@@ -8,12 +8,12 @@ generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/tenant"
 }
- 
+
 datasource db {
   provider = "postgresql"
   url      = env("TENANT_DATABASE_URL") // es: postgresql://postgres:password@localhost:5432/whistledb_TENANT
 }
- 
+
 ////////////////////////////////////////////////////
 // ENUM
 ////////////////////////////////////////////////////
@@ -22,12 +22,12 @@ enum SubscriptionPlan {
   SEMESTRALE
   ANNUALE
 }
- 
+
 enum PaymentMethod {
   CARTA
   BONIFICO
 }
- 
+
 enum EmployeeRange {
   DA_0_A_50
   DA_51_A_100
@@ -36,118 +36,137 @@ enum EmployeeRange {
   DA_201_A_250
   OLTRE_250
 }
- 
+
 enum ReportStatus {
   OPEN
   IN_PROGRESS
   SUSPENDED
   CLOSED
 }
- 
+
 enum ReportChannel {
   WEB
   PHONE
   EMAIL
   OTHER
 }
- 
+
 ////////////////////////////////////////////////////
 // MODELS
 ////////////////////////////////////////////////////
- 
-// Anagrafica del cliente (solo la sua)
+
+// Azienda cliente (tenant)
 model Client {
-  id            String          @id @default(cuid())
+  id            String         @id @default(cuid())
   companyName   String
   contactEmail  String
-  status        String          @default("ACTIVE")
+  status        String         @default("ACTIVE")
   employeeRange EmployeeRange
   subscriptions Subscription[]
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 }
- 
-// Abbonamenti del cliente
+
+// Abbonamenti legati all'azienda
 model Subscription {
   id        String           @id @default(cuid())
   clientId  String
   client    Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  amount    Decimal          @db.Decimal(10,2)
+  amount    Decimal          @db.Decimal(10, 2)
   currency  String           @default("EUR")
   plan      SubscriptionPlan
   method    PaymentMethod
   status    String           @default("SUCCESS")
   createdAt DateTime         @default(now())
 }
- 
-// Utenti interni del portale
-model User {
+
+////////////////////////////////////////////////////
+// UTENTI
+////////////////////////////////////////////////////
+
+// Utenti interni (admin, agent)
+model InternalUser {
   id        String   @id @default(cuid())
-  tenantId  String
+  clientId  String
   email     String   @unique
-  password  String   // hash con bcrypt
-  role      String   // ADMIN, AGENT, USER
+  password  String
+  role      String // ADMIN, AGENT
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
- 
+
   reports    WhistleReport[]       @relation("UserReports")
   messages   ReportMessage[]       @relation("UserMessages")
   statusLogs ReportStatusHistory[] @relation("UserStatusLogs")
 }
- 
+
+// Utenti pubblici (segnalatori esterni)
+model PublicUser {
+  id        String         @id @default(cuid())
+  clientId  String
+  token     String         @unique // token segnalazione cifrato
+  reportId  String?
+  report    WhistleReport? @relation(fields: [reportId], references: [id])
+  createdAt DateTime       @default(now())
+}
+
+////////////////////////////////////////////////////
+// REPORTING
+////////////////////////////////////////////////////
+
 // Segnalazioni
 model WhistleReport {
-  id             String                @id @default(cuid())
-  tenantId       String
-  publicCode     String                @unique
+  id             String        @id @default(cuid())
+  clientId       String
+  publicCode     String        @unique
   secretHash     String
-  status         ReportStatus          @default(OPEN)
+  status         ReportStatus  @default(OPEN)
   title          String
   summary        String?
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
   deadline       DateTime?
   acknowledgeAt  DateTime?
-  channel        ReportChannel         @default(WEB)
+  channel        ReportChannel @default(WEB)
   closedAt       DateTime?
   consentGivenAt DateTime?
   consentVersion String?
   dueAt          DateTime?
   locale         String?
- 
-  authorId  String?
-  author    User?                 @relation("UserReports", fields: [authorId], references: [id])
- 
-  messages   ReportMessage[]
-  statusLogs ReportStatusHistory[]
+
+  internalUserId String?
+  internalUser   InternalUser? @relation("UserReports", fields: [internalUserId], references: [id])
+
+  publicUsers PublicUser[] // collegamento con utenti pubblici
+  messages    ReportMessage[]
+  statusLogs  ReportStatusHistory[]
 }
- 
-// Messaggi all’interno di una segnalazione
+
+// Messaggi delle segnalazioni
 model ReportMessage {
   id        String   @id @default(cuid())
-  tenantId  String
+  clientId  String
   reportId  String
   author    String
   body      String
   createdAt DateTime @default(now())
- 
-  report    WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
- 
-  authorId  String?
-  user      User?         @relation("UserMessages", fields: [authorId], references: [id])
+
+  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  authorId String?
+  user     InternalUser? @relation("UserMessages", fields: [authorId], references: [id])
 }
- 
-// Storico cambi di stato di un report
+
+// Storico cambi di stato delle segnalazioni
 model ReportStatusHistory {
   id         String       @id @default(cuid())
-  tenantId   String
+  clientId   String
   reportId   String
   note       String?
   author     String?
   agentId    String?
   modifiedAt DateTime     @default(now())
   status     ReportStatus
- 
-  report     WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  agent      User?         @relation("UserStatusLogs", fields: [agentId], references: [id])
+
+  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  agent  InternalUser? @relation("UserStatusLogs", fields: [agentId], references: [id])
 }

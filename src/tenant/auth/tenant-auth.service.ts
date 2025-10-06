@@ -10,9 +10,9 @@ export class TenantAuthService {
 
   async signup(dto: SignupDto) {
     const hashedPassword = await bcrypt.hash(dto.password, 10);
-    return this.prisma.user.create({
+    return this.prisma.internalUser.create({
       data: {
-        tenantId: dto.tenantId,
+        clientId: dto.clientId,
         email: dto.email,
         password: hashedPassword,
         role: dto.role,
@@ -21,7 +21,7 @@ export class TenantAuthService {
   }
 
   async login(dto: LoginDto) {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.internalUser.findUnique({
       where: { email: dto.email },
     });
     if (!user) throw new Error('Invalid credentials');

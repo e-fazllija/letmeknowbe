@@ -4,7 +4,7 @@ import { IsEmail, IsString } from 'class-validator';
 export class CreateUserDto {
   @ApiProperty()
   @IsString()
-  tenantId!: string;
+  clientId!: string;
 
   @ApiProperty()
   @IsEmail()

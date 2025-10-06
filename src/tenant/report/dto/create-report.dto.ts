@@ -6,7 +6,7 @@ import { ReportStatus, ReportChannel } from '../../../generated/tenant';
 export class CreateReportDto {
   @ApiProperty()
   @IsString()
-  tenantId!: string;
+  clientId!: string;
 
   @ApiProperty()
   @IsString()
