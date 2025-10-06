@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsEnum, IsString } from 'class-validator';
-import { EmployeeRange } from '../../../generated/public'; // enum generato da Prisma
+import { EmployeeRange } from '../../../generated/public';
 
 export class CreateClientDto {
   @ApiProperty()
@@ -13,5 +13,6 @@ export class CreateClientDto {
 
   @ApiProperty({ enum: EmployeeRange, enumName: 'EmployeeRange' })
   @IsEnum(EmployeeRange)
-  employeeRange!: EmployeeRange; 
+  employeeRange!: EmployeeRange;
 }
+ 

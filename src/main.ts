@@ -6,32 +6,66 @@ import { ValidationPipe } from '@nestjs/common';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // CORS (modifica origin a piacere)
+  // Abilita CORS (tutti gli origin, utile per test)
   app.enableCors({ origin: true, credentials: true });
 
-  // Prefix globale (opzionale)
+  // Prefisso globale (facoltativo)
   app.setGlobalPrefix('v1');
 
-  // Validazione globale + trasformazione tipi (enum inclusi)
+  // Validazione globale
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true,                 // rimuove campi extra
-      forbidNonWhitelisted: false,     // se vuoi, metti true per 400 su campi sconosciuti
-      transform: true,                 // abilita class-transformer
-      transformOptions: {
-        enableImplicitConversion: true // conversioni base (string->number ecc.)
-      },
+      whitelist: true,
+      forbidNonWhitelisted: false,
+      transform: true,
+      transformOptions: { enableImplicitConversion: true },
     }),
   );
 
-  // Swagger
+  //Configurazione Swagger con descrizioni
   const config = new DocumentBuilder()
     .setTitle('LetMeKnow API')
-    .setDescription('API multi-tenant per gestione whistleblowing')
+    .setDescription(
+      `API multi-tenant per la gestione del whistleblowing.<br><br>
+      <b>Autenticazione:</b><br>
+      - Inserisci un <b>token JWT</b> (Authorization: Bearer &lt;token&gt;) per accedere alle rotte protette.<br>
+      - In alternativa, puoi usare un <b>ID Tenant</b> opzionale tramite header <code>x-tenant-id</code>.<br><br>
+      Puoi cliccare su <b>Authorize</b> per aggiungere queste informazioni una sola volta.`
+    )
     .setVersion('1.0')
+
+    //Aggiunge il campo per il token JWT
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description:
+          'Inserisci qui il tuo token JWT per accedere alle API protette.<br><br>Esempio: <code>Bearer eyJhbGciOi...</code>',
+      },
+      'access-token',
+    )
+
+    // Aggiunge il campo per l’ID Tenant (opzionale)
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'x-tenant-id',
+        in: 'header',
+        description:
+          'Inserisci qui l’ID del tenant se necessario per identificare il contesto multi-tenant.<br>Esempio: <code>intent-001</code>',
+      },
+      'tenant-key',
+    )
+
     .build();
+
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
+  SwaggerModule.setup('api', app, document, {
+    swaggerOptions: {
+      persistAuthorization: true, //Mantiene i token anche dopo il refresh
+    },
+  });
 
   const port = 3000;
   await app.listen(port);
