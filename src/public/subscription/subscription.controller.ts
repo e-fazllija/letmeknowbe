@@ -9,35 +9,35 @@ import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 export class SubscriptionController {
   constructor(private readonly service: SubscriptionService) {}
 
-  @Post('Sottoscrizione-azienda:idazienda')
-  @ApiOperation({ summary: 'Crea la sottoscrizione dell azienda tramite clientid' })
+  @Post()
+  @ApiOperation({ summary: 'Crea la sottoscrizione dell’azienda tramite clientId' })
   create(@Body() dto: CreateSubscriptionDto) {
     return this.service.create(dto);
   }
 
-  @Get('Get-Sottoscrizioni')
-  @ApiOperation({ summary: 'Ritorna tutte le sottoscrizioni delle aiende presenti nel db' })
+  @Get()
+  @ApiOperation({ summary: 'Ritorna tutte le sottoscrizioni presenti nel DB' })
   findAll() {
     return this.service.findAll();
   }
 
-  @Get('Get-sottoscrizione:idsubscription')
-  @ApiOperation({ summary: 'Ritorna la sottoscrizione desiderata tramite id della subscription' })
-  @ApiParam({ name: 'id', required: true })
+  @Get(':id')
+  @ApiOperation({ summary: 'Ritorna la sottoscrizione tramite ID' })
+  @ApiParam({ name: 'id', required: true, description: 'Subscription id' })
   findOne(@Param('id') id: string) {
     return this.service.findOne(id);
   }
 
-  @Patch('Modifica-sottoscrizione:idsubscription')
-   @ApiOperation({ summary: 'Modifica la sottoscrizione desiderata tramite id della subscription' })
-  @ApiParam({ name: 'id', required: true })
+  @Patch(':id')
+  @ApiOperation({ summary: 'Modifica la sottoscrizione tramite ID' })
+  @ApiParam({ name: 'id', required: true, description: 'Subscription id' })
   update(@Param('id') id: string, @Body() dto: UpdateSubscriptionDto) {
     return this.service.update(id, dto);
   }
 
-  @Delete('Delete-sottoscrizione:idsubscription')
-   @ApiOperation({ summary: 'Elimina la sottoscrizione desiderata tramite id della subscription' })
-  @ApiParam({ name: 'id', required: true })
+  @Delete(':id')
+  @ApiOperation({ summary: 'Elimina la sottoscrizione tramite ID' })
+  @ApiParam({ name: 'id', required: true, description: 'Subscription id' })
   remove(@Param('id') id: string) {
     return this.service.remove(id);
   }

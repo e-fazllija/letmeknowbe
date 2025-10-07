@@ -20,5 +20,4 @@ export class TenantAuthController {
   login(@Body() dto: LoginDto) {
     return this.service.login(dto);
   }
-}
- 
+} 
