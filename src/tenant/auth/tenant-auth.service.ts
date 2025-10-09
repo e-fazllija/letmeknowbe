@@ -7,7 +7,7 @@ import {
 import { PrismaTenantService } from '../prisma-tenant.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 
 @Injectable()
 export class TenantAuthService {

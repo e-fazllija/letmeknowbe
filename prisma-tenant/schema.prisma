@@ -1,9 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
+// ---------- GENERATOR & DATASOURCE ----------
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/tenant"
@@ -11,18 +6,12 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("TENANT_DATABASE_URL") // es: postgresql://postgres:password@localhost:5432/whistledb_TENANT
+  url      = env("TENANT_DATABASE_URL")
 }
 
 ////////////////////////////////////////////////////
 // ENUM
 ////////////////////////////////////////////////////
-enum SubscriptionPlan {
-  MENSILE
-  SEMESTRALE
-  ANNUALE
-}
-
 enum PaymentMethod {
   CARTA
   BONIFICO
@@ -51,6 +40,34 @@ enum ReportChannel {
   OTHER
 }
 
+// Stato cliente (coerente col public)
+enum ClientStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+// Ciclo fatturazione (coerente col public)
+enum BillingCycle {
+  MENSILE
+  ANNUALE
+}
+
+// Durata contrattuale (coerente col public)
+enum ContractTerm {
+  ONE_YEAR
+  THREE_YEARS
+}
+
+// Stato subscription (coerente col public)
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
 ////////////////////////////////////////////////////
 // MODELS
 ////////////////////////////////////////////////////
@@ -60,29 +77,29 @@ model Client {
   id            String         @id @default(cuid())
   companyName   String
   contactEmail  String
-  status        String         @default("ACTIVE")
+  status        ClientStatus   @default(ACTIVE)
   employeeRange EmployeeRange
   subscriptions Subscription[]
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
+
+  @@index([companyName])
 }
 
-// Abbonamenti legati all'azienda
+// Abbonamenti (shadow minimale nel tenant: NO dati economici)
 model Subscription {
-  id        String           @id @default(cuid())
-  clientId  String
-  client    Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  amount    Decimal          @db.Decimal(10, 2)
-  currency  String           @default("EUR")
-  plan      SubscriptionPlan
-  method    PaymentMethod
-  status    String           @default("SUCCESS")
-  createdAt DateTime         @default(now())
-}
+  id            String             @id @default(cuid())
+  clientId      String
+  client        Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  billingCycle  BillingCycle
+  contractTerm  ContractTerm
+  status        SubscriptionStatus @default(ACTIVE)
+  startsAt      DateTime           @default(now())
+  nextBillingAt DateTime?
+  createdAt     DateTime           @default(now())
 
-////////////////////////////////////////////////////
-// UTENTI
-////////////////////////////////////////////////////
+  @@index([clientId])
+}
 
 // Utenti interni (admin, agent)
 model InternalUser {
@@ -103,10 +120,13 @@ model InternalUser {
 model PublicUser {
   id        String         @id @default(cuid())
   clientId  String
-  token     String         @unique // token segnalazione cifrato
+  token     String         @unique @db.VarChar(128) // sha256
   reportId  String?
   report    WhistleReport? @relation(fields: [reportId], references: [id])
   createdAt DateTime       @default(now())
+
+  @@index([clientId])
+  @@index([token])
 }
 
 ////////////////////////////////////////////////////
@@ -118,7 +138,7 @@ model WhistleReport {
   id             String        @id @default(cuid())
   clientId       String
   publicCode     String        @unique
-  secretHash     String
+  secretHash     String        @db.VarChar(128) // sha256
   status         ReportStatus  @default(OPEN)
   title          String
   summary        String?
@@ -133,12 +153,20 @@ model WhistleReport {
   dueAt          DateTime?
   locale         String?
 
+  // Timestamp transizioni di stato (per logica SLA)
+  openAt        DateTime? @default(now())
+  inProgressAt  DateTime?
+  finalClosedAt DateTime?
+
   internalUserId String?
   internalUser   InternalUser? @relation("UserReports", fields: [internalUserId], references: [id])
 
-  publicUsers PublicUser[] // collegamento con utenti pubblici
+  publicUsers PublicUser[]
   messages    ReportMessage[]
   statusLogs  ReportStatusHistory[]
+
+  @@index([clientId])
+  @@index([status])
 }
 
 // Messaggi delle segnalazioni
@@ -150,13 +178,19 @@ model ReportMessage {
   body      String
   createdAt DateTime @default(now())
 
-  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  // Nota interna (admin/agent)
+  note      String?
+
+  report   WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
   authorId String?
   user     InternalUser? @relation("UserMessages", fields: [authorId], references: [id])
+
+  @@index([reportId])
+  @@index([clientId])
 }
 
-// Storico cambi di stato delle segnalazioni
+// Storico cambi di stato
 model ReportStatusHistory {
   id         String       @id @default(cuid())
   clientId   String
@@ -169,4 +203,8 @@ model ReportStatusHistory {
 
   report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
   agent  InternalUser? @relation("UserStatusLogs", fields: [agentId], references: [id])
+
+  @@index([reportId])
+  @@index([clientId])
+  @@index([status])
 }

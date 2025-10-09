@@ -1,7 +1,6 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
-import { SubscriptionPlan, PaymentMethod } from '../../../generated/public';
-
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsEnum, IsNumber, IsOptional, IsString, IsISO8601 } from 'class-validator';
+import { BillingCycle, ContractTerm, PaymentMethod, SubscriptionStatus } from '../../../generated/public';
 
 export class CreateSubscriptionDto {
   @ApiProperty()
@@ -17,17 +16,40 @@ export class CreateSubscriptionDto {
   @IsString()
   currency?: string;
 
-  @ApiProperty({ enum: SubscriptionPlan })
-  @IsEnum(SubscriptionPlan)
-  plan!: SubscriptionPlan;
+  @ApiProperty({ enum: BillingCycle, enumName: 'BillingCycle' })
+  @IsEnum(BillingCycle)
+  billingCycle!: BillingCycle; // MENSILE | ANNUALE
 
-  @ApiProperty({ enum: PaymentMethod })
+  @ApiProperty({ enum: ContractTerm, enumName: 'ContractTerm' })
+  @IsEnum(ContractTerm)
+  contractTerm!: ContractTerm; // ONE_YEAR | THREE_YEARS
+
+  @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })
   @IsEnum(PaymentMethod)
-  method!: PaymentMethod;
+  paymentMethod!: PaymentMethod;
 
-  @ApiProperty({ example: 'SUCCESS' })
+  @ApiPropertyOptional({ enum: SubscriptionStatus, enumName: 'SubscriptionStatus', default: 'ACTIVE' })
   @IsOptional()
-  @IsString()
-  status?: string;
+  @IsEnum(SubscriptionStatus)
+  status?: SubscriptionStatus;
+
+  @ApiPropertyOptional({ description: 'Data inizio' })
+  @IsOptional()
+  @IsISO8601()
+  startsAt?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsISO8601()
+  nextBillingAt?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsISO8601()
+  trialEndsAt?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsISO8601()
+  canceledAt?: string;
 }
- 

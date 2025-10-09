@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
-import { EmployeeRange } from '../../../generated/public';
+import { IsEmail, IsEnum, IsOptional, IsString, Length, Matches } from 'class-validator';
+import { EmployeeRange, ClientStatus } from '../../../generated/public';
 
 export class UpdateClientDto {
   @ApiPropertyOptional()
@@ -18,10 +18,55 @@ export class UpdateClientDto {
   @IsEnum(EmployeeRange)
   employeeRange?: EmployeeRange;
 
+  @ApiPropertyOptional({ enum: ClientStatus, enumName: 'ClientStatus' })
+  @IsOptional()
+  @IsEnum(ClientStatus)
+  status?: ClientStatus;
+
+  // === Billing (tutti opzionali in PATCH) ===
+  @ApiPropertyOptional({ description: 'P.IVA/CF' })
+  @IsOptional()
+  @IsString()
+  @Length(8, 28)
+  billingTaxId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsEmail()
+  billingEmail?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  status?: string; // ha default "ACTIVE", override possibile
-}
+  billingPec?: string;
 
- 
+  @ApiPropertyOptional({ description: 'SDI 7 alfanumerici' })
+  @IsOptional()
+  @Matches(/^[A-Z0-9]{7}$/i)
+  billingSdiCode?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  billingAddressLine1?: string;
+
+  @ApiPropertyOptional({ example: '00100' })
+  @IsOptional()
+  @Matches(/^\d{5}$/)
+  billingZip?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  billingCity?: string;
+
+  @ApiPropertyOptional({ example: 'RM' })
+  @IsOptional()
+  @Matches(/^[A-Z]{2}$/i)
+  billingProvince?: string;
+
+  @ApiPropertyOptional({ example: 'Italia' })
+  @IsOptional()
+  @IsString()
+  billingCountry?: string;
+}

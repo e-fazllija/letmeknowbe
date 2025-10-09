@@ -13,13 +13,7 @@ datasource db {
   provider = "postgresql"
   url      = env("PUBLIC_DATABASE_URL") // es: postgresql://postgres:password@localhost:5432/whistledb_INTENT
 }
- 
-enum SubscriptionPlan {
-  MENSILE
-  SEMESTRALE
-  ANNUALE
-}
- 
+
 enum PaymentMethod {
   CARTA
   BONIFICO
@@ -33,16 +27,58 @@ enum EmployeeRange {
   DA_201_A_250
   OLTRE_250
 }
+
+// NEW: stato cliente
+enum ClientStatus {
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+// NEW: ciclo di fatturazione
+enum BillingCycle {
+  MENSILE
+  ANNUALE
+}
+
+// NEW: durata contrattuale
+enum ContractTerm {
+  ONE_YEAR
+  THREE_YEARS
+}
+
+// NEW: stato abbonamento
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
 // CLIENT (azienda)
 model Client {
   id            String          @id @default(cuid())
   companyName   String
   contactEmail  String
-  status        String          @default("ACTIVE")
+  status        ClientStatus    @default(ACTIVE)
   employeeRange EmployeeRange
   subscriptions Subscription[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
+
+  // Billing fields (fonte di verità in PUBLIC)
+  billingTaxId        String      @unique
+  billingEmail        String
+  billingPec          String?
+  billingSdiCode      String?
+  billingAddressLine1 String
+  billingZip          String
+  billingCity         String
+  billingProvince     String
+  billingCountry      String
+
+  @@index([companyName])
 }
 
 // ABBONAMENTI
@@ -52,8 +88,13 @@ model Subscription {
   client    Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
   amount    Decimal          @db.Decimal(10,2)
   currency  String           @default("EUR")
-  plan      SubscriptionPlan
-  method    PaymentMethod
-  status    String           @default("SUCCESS")
-  createdAt DateTime         @default(now())
+  billingCycle BillingCycle
+  contractTerm ContractTerm
+  method       PaymentMethod
+  status       SubscriptionStatus @default(ACTIVE)
+  startsAt     DateTime           @default(now())
+  nextBillingAt DateTime?
+  trialEndsAt   DateTime?
+  canceledAt    DateTime?
+  createdAt    DateTime           @default(now())
 }

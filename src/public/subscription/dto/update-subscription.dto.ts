@@ -1,30 +1,60 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsString } from 'class-validator';
-import { PaymentMethod, SubscriptionPlan } from '../../../generated/public';
+import { IsEnum, IsNumber, IsOptional, IsString, IsISO8601 } from 'class-validator';
+import { BillingCycle, ContractTerm, PaymentMethod, SubscriptionStatus } from '../../../generated/public';
 
 export class UpdateSubscriptionDto {
   @ApiPropertyOptional()
   @IsOptional()
-  @IsNumber()
-  amount?: number; // Decimal(10,2), conversione nel service
+  @IsString()
+  clientId?: string;
 
-  @ApiPropertyOptional({ example: 'EUR' })
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  amount?: number;
+
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   currency?: string;
 
-  @ApiPropertyOptional({ enum: SubscriptionPlan })
+  @ApiPropertyOptional({ enum: BillingCycle, enumName: 'BillingCycle' })
   @IsOptional()
-  @IsEnum(SubscriptionPlan)
-  plan?: SubscriptionPlan;
+  @IsEnum(BillingCycle)
+  billingCycle?: BillingCycle;
 
-  @ApiPropertyOptional({ enum: PaymentMethod })
+  @ApiPropertyOptional({ enum: ContractTerm, enumName: 'ContractTerm' })
+  @IsOptional()
+  @IsEnum(ContractTerm)
+  contractTerm?: ContractTerm;
+
+  @ApiPropertyOptional({ enum: PaymentMethod, enumName: 'PaymentMethod' })
   @IsOptional()
   @IsEnum(PaymentMethod)
-  method?: PaymentMethod;
+  paymentMethod?: PaymentMethod;
 
-  @ApiPropertyOptional({ example: 'SUCCESS' })
+  @ApiPropertyOptional({ enum: SubscriptionStatus, enumName: 'SubscriptionStatus' })
   @IsOptional()
-  @IsString()
-  status?: string; // enum in una migrazione futura???
-} 
+  @IsEnum(SubscriptionStatus)
+  status?: SubscriptionStatus;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsISO8601()
+  startsAt?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsISO8601()
+  nextBillingAt?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsISO8601()
+  trialEndsAt?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsISO8601()
+  canceledAt?: string;
+}

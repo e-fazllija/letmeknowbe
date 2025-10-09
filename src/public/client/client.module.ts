@@ -19,7 +19,7 @@ import { TenantModule } from './../../tenant/tenant.module';
   providers: [
     ClientService,          // Il service principale
     PrismaPublicService,    // DB pubblico (Intent)
-    PrismaTenantService,    // DB tenant (aziende clienti)
+    // PrismaTenantService is provided by TenantModule
   ],
   exports: [
     ClientService,          // opzionale — utile se serve da altri moduli

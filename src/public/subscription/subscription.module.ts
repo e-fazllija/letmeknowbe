@@ -3,14 +3,15 @@ import { SubscriptionService } from './subscription.service';
 import { SubscriptionController } from './subscription.controller';
 import { PrismaPublicService } from '../prisma-public.service';
 import { PrismaTenantService } from './../../tenant/prisma-tenant.service';
+import { TenantModule } from './../../tenant/tenant.module';
 
 @Module({
-  imports: [], // nessun modulo extra richiesto qui
+  imports: [TenantModule],
   controllers: [SubscriptionController],
   providers: [
     SubscriptionService,
     PrismaPublicService,
-    PrismaTenantService, // ✅ aggiunto per accesso al DB tenant
+    // PrismaTenantService is provided by TenantModule
   ],
 })
 export class SubscriptionModule {}

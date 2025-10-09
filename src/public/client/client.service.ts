@@ -1,9 +1,24 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaPublicService } from '../prisma-public.service';
 import { PrismaTenantService } from './../../tenant/prisma-tenant.service';
+
+//  Import robusto dal client generato:
+// - PublicPrisma = namespace con i TIPI (PublicPrisma.ClientStatus, .Decimal, …)
+// - Enum runtime separati (ClientStatus, SubscriptionStatus, …) per i VALORI
+import {
+  Prisma as PublicPrisma,
+  ClientStatus,
+  SubscriptionStatus,
+} from '../../generated/public';
+
 import { CreateClientDto } from './dto/create-client.dto';
-import { Prisma } from '../../generated/public';
 import { UpdateClientDto } from './dto/update-client.dto';
+import { SignupClientDto } from './dto/signup-client.dto';
 
 @Injectable()
 export class ClientService {
@@ -12,34 +27,186 @@ export class ClientService {
     private tenantPrisma: PrismaTenantService,
   ) {}
 
-  //Crea il client in entrambi i DB
+  /**
+   * SIGNUP ORCHESTRATO (azienda)
+   * - Crea Client (PUBLIC) + Subscription (PUBLIC)
+   * - Replica Client e Subscription "shadow" (TENANT)
+   * - Compensa in caso di errori di replica
+   */
+  async signupOrchestrated(dto: SignupClientDto) {
+    // 1) Crea Client nel PUBLIC
+    const clientData: PublicPrisma.ClientCreateInput = {
+      companyName: dto.client.companyName,
+      contactEmail: dto.client.contactEmail,
+      employeeRange: dto.client.employeeRange,
+      status: dto.client.status ?? ClientStatus.ACTIVE, //  runtime enum
+
+      // Billing (fonte di verità in PUBLIC)
+      billingTaxId: dto.client.billing.billingTaxId,
+      billingEmail: dto.client.billing.billingEmail,
+      billingPec: dto.client.billing.billingPec,
+      billingSdiCode: dto.client.billing.billingSdiCode,
+      billingAddressLine1: dto.client.billing.billingAddressLine1,
+      billingZip: dto.client.billing.billingZip,
+      billingCity: dto.client.billing.billingCity,
+      billingProvince: dto.client.billing.billingProvince,
+      billingCountry: dto.client.billing.billingCountry,
+    };
+
+    let createdClient: { id: string } | null = null;
+    let createdSub: { id: string } | null = null;
+
+    try {
+      createdClient = await this.publicPrisma.client.create({ data: clientData });
+    } catch (e: any) {
+      if (e?.code === 'P2002') {
+        // Unique (email o billingTaxId)
+        throw new ConflictException('Azienda già esistente (email o P.IVA/CF).');
+      }
+      throw e;
+    }
+
+    try {
+      // 2) Crea Subscription nel PUBLIC
+      const subData: PublicPrisma.SubscriptionCreateInput = {
+        client: { connect: { id: createdClient.id } },
+        amount: new PublicPrisma.Decimal(dto.subscription.amount),
+        currency: dto.subscription.currency ?? 'EUR',
+        billingCycle: dto.subscription.billingCycle,
+        contractTerm: dto.subscription.contractTerm,
+        method: dto.subscription.paymentMethod,
+        status: dto.subscription.status ?? SubscriptionStatus.ACTIVE, //  runtime enum
+
+        startsAt: dto.subscription.startsAt
+          ? new Date(dto.subscription.startsAt)
+          : undefined,
+        nextBillingAt: dto.subscription.nextBillingAt
+          ? new Date(dto.subscription.nextBillingAt)
+          : undefined,
+        trialEndsAt: dto.subscription.trialEndsAt
+          ? new Date(dto.subscription.trialEndsAt)
+          : undefined,
+        canceledAt: dto.subscription.canceledAt
+          ? new Date(dto.subscription.canceledAt)
+          : undefined,
+      };
+
+      const sub = await this.publicPrisma.subscription.create({ data: subData });
+      createdSub = { id: sub.id };
+
+      // 3) Replica nel TENANT (shadow minimal)
+      await this.tenantPrisma.client.upsert({
+        where: { id: createdClient.id },
+        update: {
+          companyName: clientData.companyName,
+          contactEmail: clientData.contactEmail,
+          employeeRange: clientData.employeeRange,
+          status: clientData.status as any, // tipi allineati (enum identico nel tenant)
+        },
+        create: {
+          id: createdClient.id,
+          companyName: clientData.companyName,
+          contactEmail: clientData.contactEmail,
+          employeeRange: clientData.employeeRange,
+          status: clientData.status as any,
+        },
+      });
+
+      await this.tenantPrisma.subscription.create({
+        data: {
+          id: sub.id, // stesso id per correlazione
+          clientId: createdClient.id,
+          billingCycle: sub.billingCycle,
+          contractTerm: sub.contractTerm,
+          status: sub.status as any,
+          startsAt: sub.startsAt,
+          nextBillingAt: sub.nextBillingAt ?? undefined,
+        },
+      });
+
+      return {
+        clientId: createdClient.id,
+        subscriptionId: sub.id,
+        status: 'SUCCESS',
+      };
+    } catch (e: any) {
+      // COMPENSAZIONE PUBLIC in caso fallisca la replica TENANT o la creazione sub
+      try {
+        if (createdSub?.id) {
+          await this.publicPrisma.subscription.delete({
+            where: { id: createdSub.id },
+          });
+        }
+      } catch {}
+      try {
+        if (createdClient?.id) {
+          await this.publicPrisma.client.delete({
+            where: { id: createdClient.id },
+          });
+        }
+      } catch {}
+
+      if (e?.code === 'P2002') {
+        throw new ConflictException('Conflitto di chiavi (tenant).');
+      }
+      if (e?.code === 'P2003') {
+        throw new BadRequestException(
+          'FK non valida durante la replica nel tenant.',
+        );
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * CREATE (granulare) - mantiene compatibilità con la tua rotta esistente
+   * Se usi questo endpoint per creare senza billing completo, i campi billing possono essere opzionali.
+   */
   async create(dto: CreateClientDto) {
-    const data: Prisma.ClientCreateInput = {
+    const data: PublicPrisma.ClientCreateInput = {
       companyName: dto.companyName,
       contactEmail: dto.contactEmail,
       employeeRange: dto.employeeRange,
+
+      // Billing opzionali se il DTO granular non li richiede tutti
+      billingTaxId: (dto as any).billingTaxId,
+      billingEmail: (dto as any).billingEmail,
+      billingPec: (dto as any).billingPec,
+      billingSdiCode: (dto as any).billingSdiCode,
+      billingAddressLine1: (dto as any).billingAddressLine1,
+      billingZip: (dto as any).billingZip,
+      billingCity: (dto as any).billingCity,
+      billingProvince: (dto as any).billingProvince,
+      billingCountry: (dto as any).billingCountry,
     };
 
     try {
       const client = await this.publicPrisma.client.create({ data });
+
       await this.tenantPrisma.client.create({
         data: {
           id: client.id,
           companyName: client.companyName,
           contactEmail: client.contactEmail,
           employeeRange: client.employeeRange,
+          status: client.status as any,
         },
       });
+
       return client;
     } catch (e: any) {
       if (e?.code === 'P2002') {
-        throw new ConflictException('Azienda o email già esistenti');
+        throw new ConflictException(
+          'Azienda o email/P.IVA già esistenti nel sistema.',
+        );
       }
       throw e;
     }
   }
 
-  //Legge tutti i clienti da ENTRAMBI i DB
+  /**
+   * READ ALL - merge PUBLIC + TENANT (evitando duplicati per id)
+   */
   async findAll() {
     const [publicClients, tenantClients] = await Promise.all([
       this.publicPrisma.client.findMany({
@@ -52,21 +219,21 @@ export class ClientService {
       }),
     ]);
 
-    // unisce ed elimina duplicati per ID
     const merged = [
-      ...publicClients.map(c => ({ ...c, source: 'INTENT' })),
-      ...tenantClients.map(c => ({ ...c, source: 'TENANT' })),
+      ...publicClients.map((c) => ({ ...c, source: 'PUBLIC' })),
+      ...tenantClients.map((c) => ({ ...c, source: 'TENANT' })),
     ].filter(
-      (client, index, self) =>
-        index === self.findIndex(c => c.id === client.id)
+      (client, index, self) => index === self.findIndex((c) => c.id === client.id),
     );
 
     return merged;
   }
 
-  //Legge un singolo client da entrambi i DB
+  /**
+   * READ ONE - ritorna sia fonte PUBLIC che TENANT (se esistono)
+   */
   async findOne(id: string) {
-    const [clientIntent, clientTenant] = await Promise.all([
+    const [clientPublic, clientTenant] = await Promise.all([
       this.publicPrisma.client.findUnique({
         where: { id },
         include: { subscriptions: true },
@@ -77,33 +244,41 @@ export class ClientService {
       }),
     ]);
 
-    if (!clientIntent && !clientTenant)
+    if (!clientPublic && !clientTenant)
       throw new NotFoundException('Client non trovato in nessun database');
 
-    // ritorna entrambi se presenti
     return {
-      intent: clientIntent || null,
+      public: clientPublic || null,
       tenant: clientTenant || null,
     };
   }
 
-  //Aggiorna in entrambi i DB
+  /**
+   * UPDATE - aggiorna in entrambi i DB
+   */
   async update(id: string, dto: UpdateClientDto) {
     try {
-      const updatedIntent = await this.publicPrisma.client.update({
+      const updatedPublic = await this.publicPrisma.client.update({
         where: { id },
-        data: dto as Prisma.ClientUpdateInput,
+        data: dto as PublicPrisma.ClientUpdateInput,
       });
 
       await this.tenantPrisma.client.update({
         where: { id },
-        data: dto as Prisma.ClientUpdateInput,
+        data: {
+          companyName: dto.companyName ?? undefined,
+          contactEmail: dto.contactEmail ?? undefined,
+          employeeRange: dto.employeeRange ?? undefined,
+          status: (dto.status as any) ?? undefined,
+        },
       });
 
-      return updatedIntent;
+      return updatedPublic;
     } catch (e: any) {
       if (e?.code === 'P2002') {
-        throw new ConflictException('Azienda o email già esistenti');
+        throw new ConflictException(
+          'Azienda o email/P.IVA già esistenti (vincolo univoco).',
+        );
       }
       if (e?.code === 'P2025') {
         throw new NotFoundException('Client non trovato');
@@ -112,7 +287,9 @@ export class ClientService {
     }
   }
 
-  //Cancella in entrambi i DB
+  /**
+   * DELETE - cancella prima nel TENANT e poi nel PUBLIC
+   */
   async remove(id: string) {
     try {
       await this.tenantPrisma.client.delete({ where: { id } });
@@ -125,7 +302,9 @@ export class ClientService {
     }
   }
 
-  //Ottiene tutte le subscription da ENTRAMBI i DB
+  /**
+   * Lista Subscription per clientId da entrambi i DB (nota: campi diversi tra public e tenant)
+   */
   async findSubscriptions(id: string) {
     const [publicSubs, tenantSubs] = await Promise.all([
       this.publicPrisma.subscription.findMany({
@@ -139,7 +318,7 @@ export class ClientService {
     ]);
 
     return {
-      intent: publicSubs,
+      public: publicSubs,
       tenant: tenantSubs,
     };
   }

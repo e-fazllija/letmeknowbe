@@ -24,8 +24,11 @@ export class CreateReportStatusDto {
   @IsOptional()
   agentId?: string;
 
-  @ApiProperty({ enum: ReportStatus })
+  @ApiProperty({
+    enum: ReportStatus,
+    description: 'Nuovo stato del report (OPEN, IN_PROGRESS, CLOSED)',
+  })
   @IsEnum(ReportStatus)
-  status!: ReportStatus;
+  status!: ReportStatus
 }
  
