@@ -15,6 +15,7 @@ import {
   ClientStatus,
   SubscriptionStatus,
 } from '../../generated/public';
+import * as crypto from 'crypto';
 
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
@@ -124,10 +125,55 @@ export class ClientService {
         },
       });
 
+      // 4) Crea Admin INVITED come Owner + token di invito (token split)
+      const adminEmail = clientData.contactEmail.toLowerCase();
+      const selector = crypto.randomUUID();
+      const tokenPlain = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(tokenPlain).digest('hex');
+      const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 48); // 48h
+
+      const invited = await this.tenantPrisma.internalUser.create({
+        data: {
+          clientId: createdClient.id,
+          email: adminEmail,
+          password: '', // verrà impostata in activate
+          role: 'ADMIN' as any,
+          status: 'INVITED' as any,
+          isOwner: true,
+        },
+        select: { id: true, email: true },
+      });
+
+      await this.tenantPrisma.userToken.create({
+        data: {
+          userId: invited.id,
+          clientId: createdClient.id,
+          type: 'INVITE' as any,
+          selector,
+          tokenHash,
+          expiresAt,
+        },
+      });
+
+      const frontendBase = process.env.FRONTEND_BASE_URL?.replace(/\/$/, '');
+      const apiBase = process.env.API_BASE_URL?.replace(/\/$/, '') ?? 'http://localhost:3000/v1';
+      const activationUrl = frontendBase
+        ? `${frontendBase}/activate?selector=${encodeURIComponent(selector)}&token=${encodeURIComponent(tokenPlain)}`
+        : `${apiBase}/public/auth/activate?selector=${encodeURIComponent(selector)}&token=${encodeURIComponent(tokenPlain)}`;
+      // In ambiente locale, logga il link di attivazione (in produzione invio e-mail)
+      // eslint-disable-next-line no-console
+      console.log(`[Signup] Activation link for ${invited.email}: ${activationUrl}`);
+
+      const exposeUrl = process.env.EXPOSE_ACTIVATION_URLS === 'true' || process.env.NODE_ENV !== 'production';
       return {
         clientId: createdClient.id,
         subscriptionId: sub.id,
         status: 'SUCCESS',
+        ownerInvite: {
+          email: invited.email,
+          expiresAt,
+          ...(exposeUrl ? { activationUrl } : {}),
+        },
       };
     } catch (e: any) {
       // COMPENSAZIONE PUBLIC in caso fallisca la replica TENANT o la creazione sub

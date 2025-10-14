@@ -42,9 +42,11 @@ export class PublicUserService {
 
   async update(id: string, dto: UpdatePublicUserDto) {
     try {
+      // token è immutabile: rimuovilo dall'update per sicurezza
+      const { token, ...safe } = (dto as any) || {};
       return await this.prisma.publicUser.update({
         where: { id },
-        data: dto,
+        data: safe,
       });
     } catch (e: any) {
       if (e?.code === 'P2025') throw new NotFoundException('PublicUser non trovato');

@@ -169,6 +169,18 @@ export class ReportService {
       data,
     });
 
+    // Scrivi storico cambi di stato (audit)
+    await this.prisma.reportStatusHistory.create({
+      data: {
+        clientId: report.clientId,
+        reportId: report.id,
+        note: dto.note ?? undefined,
+        author: dto.author ?? undefined,
+        agentId: dto.agentId ?? undefined,
+        status: newStatus,
+      },
+    });
+
     return { message: 'Stato segnalazione aggiornato con successo', newStatus };
   }
 

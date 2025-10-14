@@ -68,6 +68,24 @@ enum SubscriptionStatus {
   EXPIRED
 }
 
+// --- NEW: User/Invite/Session enums ---
+enum UserStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+}
+
+enum UserRole {
+  ADMIN
+  AGENT
+}
+
+enum UserTokenType {
+  INVITE
+  RESET
+  VERIFY
+}
+
 ////////////////////////////////////////////////////
 // MODELS
 ////////////////////////////////////////////////////
@@ -103,17 +121,29 @@ model Subscription {
 
 // Utenti interni (admin, agent)
 model InternalUser {
-  id        String   @id @default(cuid())
-  clientId  String
-  email     String   @unique
-  password  String
-  role      String // ADMIN, AGENT
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id              String     @id @default(cuid())
+  clientId        String
+  email           String
+  password        String
+  role            UserRole
+  status          UserStatus @default(INVITED)
+  isOwner         Boolean    @default(false)
+  canViewAllCases Boolean    @default(false)
+  mfaEnabled      Boolean    @default(false)
+  mfaSecret       String?
+  mfaVerifiedAt   DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
 
-  reports    WhistleReport[]       @relation("UserReports")
-  messages   ReportMessage[]       @relation("UserMessages")
-  statusLogs ReportStatusHistory[] @relation("UserStatusLogs")
+  reports        WhistleReport[]       @relation("UserReports")
+  messages       ReportMessage[]       @relation("UserMessages")
+  statusLogs     ReportStatusHistory[] @relation("UserStatusLogs")
+  UserToken      UserToken[]
+  RefreshSession RefreshSession[]
+  recoveryCodes  UserRecoveryCode[]
+
+  @@unique([clientId, email])
+  @@index([clientId])
 }
 
 // Utenti pubblici (segnalatori esterni)
@@ -179,9 +209,9 @@ model ReportMessage {
   createdAt DateTime @default(now())
 
   // Nota interna (admin/agent)
-  note      String?
+  note String?
 
-  report   WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
   authorId String?
   user     InternalUser? @relation("UserMessages", fields: [authorId], references: [id])
@@ -207,4 +237,58 @@ model ReportStatusHistory {
   @@index([reportId])
   @@index([clientId])
   @@index([status])
+}
+
+// --- NEW: Token di invito/reset split (selector + tokenHash) ---
+model UserToken {
+  id        String        @id @default(cuid())
+  userId    String
+  clientId  String
+  type      UserTokenType
+  selector  String        @unique
+  tokenHash String        @db.VarChar(128)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+  ip        String?
+  ua        String?
+
+  user InternalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, userId, type, expiresAt])
+}
+
+// --- NEW: Sessioni refresh con rotazione e revoke ---
+model RefreshSession {
+  id            String    @id @default(uuid()) // jti
+  userId        String
+  clientId      String
+  hash          String    @db.VarChar(128)
+  createdAt     DateTime  @default(now())
+  expiresAt     DateTime
+  lastUsedAt    DateTime?
+  revokedAt     DateTime?
+  rotatedFromId String?
+  ip            String?
+  ua            String?
+
+  user        InternalUser     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rotatedFrom RefreshSession?  @relation("RefreshRotation", fields: [rotatedFromId], references: [id])
+  rotatedTo   RefreshSession[] @relation("RefreshRotation")
+
+  @@index([userId, clientId])
+  @@index([expiresAt])
+}
+
+// --- NEW: Codici di recupero MFA ---
+model UserRecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String    @db.VarChar(128)
+  createdAt DateTime  @default(now())
+  usedAt    DateTime?
+
+  user InternalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
 }

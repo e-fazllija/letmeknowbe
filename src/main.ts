@@ -2,12 +2,20 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
+import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Hardening base
+  app.use(helmet());
+  app.use(cookieParser());
+
   // Abilita CORS (tutti gli origin, utile per test)
   app.enableCors({ origin: true, credentials: true });
+
+  // Cookie parser per gestire refresh token HttpOnly
 
   // Prefisso globale (facoltativo)
   app.setGlobalPrefix('v1');
@@ -53,7 +61,7 @@ async function bootstrap() {
         name: 'x-tenant-id',
         in: 'header',
         description:
-          'Inserisci qui l’ID del tenant se necessario per identificare il contesto multi-tenant.<br>Esempio: <code>intent-001</code>',
+          'Inserisci qui l`ID del tenant se necessario per identificare il contesto multi-tenant.<br>Esempio: <code>intent-001</code>',
       },
       'tenant-key',
     )
