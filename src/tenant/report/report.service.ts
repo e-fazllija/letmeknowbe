@@ -1,10 +1,12 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException } from '@nestjs/common';
 import { PrismaTenantService } from '../prisma-tenant.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { CreateReportMessageDto } from './dto/create-report-message.dto';
 import { CreateReportStatusDto } from './dto/create-report-status.dto';
 import * as crypto from 'crypto';
 import { ReportStatus } from '../../generated/tenant';
+import * as bcrypt from 'bcryptjs';
+import { Request } from 'express';
 
 // Helper locale: aggiunge giorni a una data
 function addDays(base: Date, days: number): Date {
@@ -24,43 +26,161 @@ export class ReportService {
   };
 
   /**
-   * Crea una nuova segnalazione anonima
+   * Crea una nuova segnalazione (TENANT/backoffice) con payload unificato.
    */
-  async createReport(dto: CreateReportDto) {
-    const title = `${dto.clientId}: ${dto.tipoSegnalazione}, ${dto.ufficio}`;
+  async createReportInternal(req: Request, body: any) {
+    const user = (req as any).user || {};
+    const tenantId = user.clientId as string;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
 
-    const tokenPlain = `${dto.clientId}-${Date.now()}-${Math.random()
-      .toString(36)
-      .substring(2, 15)}`;
-    const secretToken = crypto.createHash('sha256').update(tokenPlain).digest('hex');
+    // Normalizzazione payload: nuovo schema o legacy
+    const subject = (body?.subject as string) || [body?.tipoSegnalazione, body?.ufficio].filter(Boolean).join(' - ');
+    const description = (body?.description as string) || (body?.segnalazione as string);
+    const date = (body?.date as string) || new Date().toISOString();
+    const source = (body?.source as string) || (body?.channel as string) || 'WEB';
+    const privacy = ((body?.privacy as string) || 'ANONIMO').toUpperCase();
+    const departmentId = body?.departmentId as string | undefined;
+    const categoryId = body?.categoryId as string | undefined;
+    const attachments = Array.isArray(body?.attachments) ? body.attachments : [];
 
-    const report = await this.prisma.whistleReport.create({
-      data: {
-        clientId: dto.clientId,
-        title,
-        summary: dto.segnalazione,
-        status: 'OPEN',
-        channel: 'WEB',
-        publicCode: `PUB-${Date.now()}`,
-        secretHash: `SEC-${Date.now()}`,
-        openAt: new Date(),
-      },
-    });
+    if (!subject || subject.length < 3 || subject.length > 200) {
+      throw new BadRequestException('Oggetto non valido');
+    }
+    if (!description || description.length < 10 || description.length > 10000) {
+      throw new BadRequestException('Descrizione non valida');
+    }
+    if (!departmentId || !categoryId) {
+      throw new BadRequestException('departmentId e categoryId sono obbligatori');
+    }
 
-    const publicUser = await this.prisma.publicUser.create({
-      data: {
-        clientId: dto.clientId,
-        token: secretToken,
-        reportId: report.id,
-      },
-    });
+    // Scoping forte: department/category appartengono al tenant e si relazionano correttamente
+    const dep = await this.prisma.department.findFirst({ where: { id: departmentId, clientId: tenantId, active: true }, select: { id: true } });
+    if (!dep) throw new NotFoundException('Risorsa non trovata');
+    const cat = await this.prisma.category.findFirst({ where: { id: categoryId, clientId: tenantId, departmentId, active: true }, select: { id: true } });
+    if (!cat) throw new NotFoundException('Risorsa non trovata');
 
-    return {
-      message: 'Segnalazione creata con successo',
-      reportId: report.id,
-      tokenAccesso: tokenPlain,
-      publicUserId: publicUser.id,
+    // Allegati policy (identica al public)
+    const presignEnabled = (process.env.PRESIGN_ENABLED || '').toLowerCase() === 'true' || process.env.PRESIGN_ENABLED === '1';
+    const toBytes = (mb: number) => Math.floor(mb * 1024 * 1024);
+    const maxFiles = parseInt(process.env.ATTACH_MAX_FILES || '3', 10);
+    const maxFileBytes = toBytes(parseInt(process.env.ATTACH_MAX_FILE_MB || '10', 10));
+    const maxTotalBytes = toBytes(parseInt(process.env.ATTACH_MAX_TOTAL_MB || '20', 10));
+    const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain']);
+    const EXT_FOR_MIME: Record<string, string[]> = {
+      'image/png': ['.png'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'application/pdf': ['.pdf'],
+      'text/plain': ['.txt'],
     };
+    const getExt = (name: string) => {
+      const i = name.lastIndexOf('.');
+      return i >= 0 ? name.substring(i).toLowerCase() : '';
+    };
+
+    if (attachments.length > 0 && !presignEnabled) {
+      throw new BadRequestException('Allegati non consentiti');
+    }
+    if (attachments.length > maxFiles) throw new PayloadTooLargeException('Troppe parti allegate');
+    let total = 0;
+    for (const a of attachments) {
+      if (!ALLOWED_MIME.has(a.mimeType)) throw new BadRequestException('Tipo file non consentito');
+      const ext = getExt(a.fileName);
+      const allowedExt = EXT_FOR_MIME[a.mimeType] || [];
+      if (!allowedExt.includes(ext)) throw new BadRequestException('Estensione incoerente con MIME');
+      if (!a.storageKey || !a.storageKey.startsWith(`${tenantId}/`)) throw new BadRequestException('storageKey non valido');
+      if (a.sizeBytes > maxFileBytes) throw new PayloadTooLargeException('File oltre il limite');
+      total += a.sizeBytes || 0;
+      if (total > maxTotalBytes) throw new PayloadTooLargeException('Dimensione totale oltre il limite');
+    }
+
+    // Helper
+    const mapSource = (src: string): 'WEB' | 'PHONE' | 'EMAIL' | 'OTHER' => {
+      const s = (src || '').toUpperCase();
+      if (s === 'ALTRO') return 'OTHER';
+      if (s === 'WEB' || s === 'PHONE' || s === 'EMAIL' || s === 'OTHER') return s as any;
+      return 'OTHER';
+    };
+    const base64url = (buf: Buffer) => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    const hmacSha256Hex = (key: string, data: string) => crypto.createHmac('sha256', key).update(data).digest('hex');
+    const detectPii = (text: string) => {
+      if (!text) return false;
+      const email = /\b[\w.%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/;
+      const phone = /(?:(?:\+|00)\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}/;
+      return email.test(text) || phone.test(text);
+    };
+    const normalizeCode = () => {
+      const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const pick = (n: number) => Array.from({ length: n }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+      return `R-${pick(4)}-${pick(4)}`.toUpperCase();
+    };
+
+    const now = new Date();
+    const eventDate = new Date(date);
+    const channel = mapSource(source);
+    const piiEnabled = (process.env.PII_CHECK_ENABLED || '').toLowerCase() === 'true' || process.env.PII_CHECK_ENABLED === '1';
+    const containsPII = piiEnabled && (detectPii(subject) || detectPii(description));
+
+    const secretRaw = base64url(crypto.randomBytes(32));
+    const pepper = process.env.REPORT_SECRET_PEPPER || 'dev_report_pepper';
+    const cost = parseInt(process.env.REPORT_SECRET_COST || '12', 10);
+    const secretHash = await bcrypt.hash(secretRaw + pepper, cost);
+    const tokenSha = crypto.createHash('sha256').update(secretRaw).digest('hex');
+
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || (req.socket?.remoteAddress || '');
+    const ipPepper = process.env.IP_HASH_PEPPER || 'dev_ip_pepper';
+    const ipHash = ip ? hmacSha256Hex(ipPepper, ip) : undefined;
+    const ua = (req.headers['user-agent'] as string) || undefined;
+
+    let report: any;
+    let publicCode = '';
+    for (let i = 0; i < 5; i++) {
+      try {
+        publicCode = normalizeCode();
+        report = await this.prisma.$transaction(async (tx) => {
+          const r = await tx.whistleReport.create({
+            data: {
+              clientId: tenantId,
+              publicCode,
+              secretHash,
+              status: 'OPEN' as any,
+              title: subject,
+              summary: description,
+              createdAt: now,
+              channel: channel as any,
+              eventDate,
+              privacy: privacy as any,
+              departmentId,
+              categoryId,
+              containsPIISuspected: !!containsPII,
+              ipHash,
+              ua,
+            },
+          });
+          await tx.publicUser.create({ data: { clientId: tenantId, token: tokenSha, reportId: r.id } });
+          if (attachments.length > 0) {
+            await tx.reportAttachment.createMany({
+              data: attachments.map((a: any) => ({
+                reportId: r.id,
+                fileName: a.fileName,
+                mimeType: a.mimeType,
+                sizeBytes: a.sizeBytes,
+                storageKey: a.storageKey,
+              })),
+            });
+          }
+          return r;
+        });
+        break;
+      } catch (e: any) {
+        const code = e?.code || e?.meta?.code;
+        const target = Array.isArray(e?.meta?.target) ? e.meta.target.join(',') : e?.meta?.target;
+        if (code === 'P2002' && (target?.includes('publicCode') || true)) continue;
+        throw e;
+      }
+    }
+    if (!report) throw new BadRequestException('Impossibile creare la segnalazione, riprovare');
+
+    return { reportId: report.id, publicCode: publicCode.toUpperCase(), secret: secretRaw, createdAt: report.createdAt };
   }
 
   /**

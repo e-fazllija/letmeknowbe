@@ -1,29 +1,26 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-  Query,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ReportService } from './report.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { CreateReportMessageDto } from './dto/create-report-message.dto';
 import { CreateReportStatusDto } from './dto/create-report-status.dto';
-import { ApiOperation, ApiTags, ApiQuery, ApiParam, ApiBody } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { Request } from 'express';
+import { CreateTenantReportDto } from './dto/create-tenant-report.dto';
 
 @ApiTags('Tenant - Segnalazioni')
 @Controller('tenant/reports')
 export class ReportController {
   constructor(private readonly service: ReportService) {}
 
-  // CREA NUOVA SEGNALAZIONE ANONIMA
+  // CREA NUOVA SEGNALAZIONE (TENANT, BACKOFFICE)
   @Post()
-  @ApiOperation({ summary: 'Crea una nuova segnalazione anonima' })
-  createReport(@Body() dto: CreateReportDto) {
-    return this.service.createReport(dto);
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Crea una segnalazione (backoffice) con payload unificato' })
+  @ApiBody({ type: CreateTenantReportDto, description: 'Supporto legacy: tipoSegnalazione/ufficio/segnalazione verranno mappati internamente (deprecato).', required: true })
+  createReport(@Body() body: any, @Req() req: Request) {
+    return this.service.createReportInternal(req, body);
   }
 
   // RECUPERA SEGNALAZIONE PUBBLICA TRAMITE TOKEN

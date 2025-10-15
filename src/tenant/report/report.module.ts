@@ -1,13 +1,15 @@
 import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
 import { ReportController } from './report.controller';
 import { ReportService } from './report.service';
 import { PrismaTenantService } from '../prisma-tenant.service';
 import { TenantModule } from '../tenant.module';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 @Module({
-  imports: [TenantModule],
+  imports: [TenantModule, JwtModule.register({})],
   controllers: [ReportController],
-  providers: [ReportService],
+  providers: [ReportService, JwtAuthGuard],
   exports: [ReportService],
 })
 export class ReportModule {}

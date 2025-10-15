@@ -48,8 +48,46 @@ function detectPii(text: string): boolean {
 export class PublicReportService {
   constructor(private prisma: PrismaTenantService) {}
 
+  private defaults() {
+    return [
+      { name: 'HR', sortOrder: 10, categories: ['Molestie', 'Discriminazioni', 'Mobbing'] },
+      { name: 'Amministrazione/Finanza', sortOrder: 20, categories: ['Frode contabile', 'Fatture false', 'Appropriazione indebita'] },
+      { name: 'IT', sortOrder: 30, categories: ['Sicurezza informatica', 'Accessi non autorizzati', 'Dati personali'] },
+      { name: 'Compliance/Legal', sortOrder: 40, categories: ['Corruzione', 'Conflitto di interessi', 'Concorrenza sleale'] },
+      { name: 'Sicurezza', sortOrder: 50, categories: ['Infortuni', 'Near-miss', 'Condizioni pericolose'] },
+      { name: 'Altro', sortOrder: 90, categories: ['Altro'] },
+    ];
+  }
+
+  private async maybeAutoBootstrapLookups(tenantId: string) {
+    const auto = isTrue(process.env.AUTO_BOOTSTRAP_LOOKUPS);
+    if (!auto) return;
+    const existing = await this.prisma.department.count({ where: { clientId: tenantId } });
+    if (existing > 0) return;
+    const defs = this.defaults();
+    await this.prisma.$transaction(async (tx) => {
+      for (const d of defs) {
+        const dep = await tx.department.create({
+          data: { clientId: tenantId, name: d.name, sortOrder: d.sortOrder, active: true },
+        });
+        if (d.categories?.length) {
+          await tx.category.createMany({
+            data: d.categories.map((c, idx) => ({
+              clientId: tenantId,
+              departmentId: dep.id,
+              name: c,
+              active: true,
+              sortOrder: idx,
+            })),
+          });
+        }
+      }
+    });
+  }
+
   async listDepartments(tenantId: string) {
     if (!tenantId) throw new BadRequestException('Richiesta non valida');
+    await this.maybeAutoBootstrapLookups(tenantId);
     return this.prisma.department.findMany({
       where: { clientId: tenantId, active: true },
       select: { id: true, name: true, sortOrder: true },
