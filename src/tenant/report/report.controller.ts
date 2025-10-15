@@ -61,7 +61,7 @@ export class ReportController {
   @Patch(':reportId/status')
   @ApiOperation({
     summary: 'Aggiorna lo stato della segnalazione',
-    description: 'Aggiorna esclusivamente lo stato (OPEN, IN_PROGRESS, CLOSED) e aggiorna i timestamp.',
+    description: 'Aggiorna esclusivamente lo stato (OPEN, IN_PROGRESS, SUSPENDED, NEED_INFO, CLOSED). I timestamp vengono aggiornati per OPEN/IN_PROGRESS/CLOSED.',
   })
   updateStatus(@Param('reportId') reportId: string, @Body() dto: CreateReportStatusDto) {
     return this.service.updateStatus(reportId, dto);

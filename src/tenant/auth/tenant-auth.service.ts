@@ -145,8 +145,8 @@ export class TenantAuthService {
     return this.issueSession(user, req, ['pwd']);
   }
 
-  async generateMfaSetup(authHeader: string) {
-    const token = this.extractBearerToken(authHeader);
+  async generateMfaSetup(headerOrToken: string) {
+    const token = this.extractBearerToken(headerOrToken);
     const payload = this.verifyMfaToken(token, 'mfa-setup');
     const user = await this.prisma.internalUser.findUnique({
       where: { id: payload.sub },
@@ -180,8 +180,8 @@ export class TenantAuthService {
     };
   }
 
-  async verifyMfaSetup(authHeader: string, dto: MfaCodeDto) {
-    const token = this.extractBearerToken(authHeader);
+  async verifyMfaSetup(headerOrToken: string, dto: MfaCodeDto) {
+    const token = this.extractBearerToken(headerOrToken);
     const payload = this.verifyMfaToken(token, 'mfa-setup');
     const user = await this.prisma.internalUser.findUnique({
       where: { id: payload.sub },
@@ -226,8 +226,8 @@ export class TenantAuthService {
     };
   }
 
-  async completeMfa(authHeader: string, dto: MfaCodeDto, req: Request) {
-    const token = this.extractBearerToken(authHeader);
+  async completeMfa(headerOrToken: string, dto: MfaCodeDto, req: Request) {
+    const token = this.extractBearerToken(headerOrToken);
     const payload = this.verifyMfaToken(token, 'mfa');
     const user = await this.prisma.internalUser.findUnique({
       where: { id: payload.sub },
@@ -256,8 +256,8 @@ export class TenantAuthService {
     return this.issueSession(user, req, ['pwd', 'mfa'], { mfaAt: new Date() });
   }
 
-  async completeMfaWithRecovery(authHeader: string, dto: MfaRecoveryDto, req: Request) {
-    const token = this.extractBearerToken(authHeader);
+  async completeMfaWithRecovery(headerOrToken: string, dto: MfaRecoveryDto, req: Request) {
+    const token = this.extractBearerToken(headerOrToken);
     const payload = this.verifyMfaToken(token, 'mfa');
     const user = await this.prisma.internalUser.findUnique({
       where: { id: payload.sub },
@@ -320,11 +320,14 @@ export class TenantAuthService {
     }
   }
 
-  private extractBearerToken(header?: string): string {
-    if (!header || !header.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Authorization header mancante o invalido');
+  private extractBearerToken(input?: string): string {
+    if (!input) throw new UnauthorizedException('MFA token mancante');
+    const trimmed = input.trim();
+    if (/^bearer\s+/i.test(trimmed)) {
+      return trimmed.replace(/^bearer\s+/i, '').trim();
     }
-    return header.slice(7).trim();
+    // Se arriva già solo il token, accettalo
+    return trimmed;
   }
 
   private async issueSession(

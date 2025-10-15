@@ -71,23 +71,30 @@ export class ReportService {
 
     const user = await this.prisma.publicUser.findUnique({
       where: { token: secretToken },
-      include: {
+      select: {
         report: {
-          include: {
+          select: {
+            id: true,
+            publicCode: true,
+            status: true,
+            title: true,
+            summary: true,
+            createdAt: true,
+            updatedAt: true,
+            eventDate: true,
+            privacy: true,
+            channel: true,
             messages: {
-              select: {
-                id: true,
-                author: true,
-                body: true,
-                createdAt: true,
-              },
+              where: { visibility: 'PUBLIC' as any },
+              select: { id: true, author: true, body: true, createdAt: true },
+              orderBy: { createdAt: 'asc' },
             },
           },
         },
       },
     });
 
-    if (!user) throw new NotFoundException('Token non valido o segnalazione non trovata');
+    if (!user || !user.report) throw new NotFoundException('Token non valido o segnalazione non trovata');
 
     return {
       message: 'Segnalazione trovata',
@@ -180,6 +187,22 @@ export class ReportService {
         status: newStatus,
       },
     });
+    
+    // Se NEED_INFO, crea messaggio di sistema con richiesta chiarimenti
+    if ((dto.status || '').toUpperCase() === 'NEED_INFO') {
+      const defaultBody = 'Richiesta di informazioni aggiuntive da parte del team. Per favore fornisci i dettagli mancanti utili alla gestione.';
+      const body = dto.note ? `${defaultBody}\n\nDettagli: ${dto.note}` : defaultBody;
+      await this.prisma.reportMessage.create({
+        data: {
+          clientId: report.clientId,
+          reportId: report.id,
+          author: dto.author || 'system',
+          body,
+          note: undefined,
+          visibility: 'SYSTEM' as any,
+        },
+      });
+    }
 
     return { message: 'Stato segnalazione aggiornato con successo', newStatus };
   }

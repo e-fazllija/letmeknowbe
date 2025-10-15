@@ -30,6 +30,7 @@ enum ReportStatus {
   OPEN
   IN_PROGRESS
   SUSPENDED
+  NEED_INFO
   CLOSED
 }
 
@@ -38,6 +39,12 @@ enum ReportChannel {
   PHONE
   EMAIL
   OTHER
+}
+
+// Privacy del segnalante
+enum ReporterPrivacy {
+  ANONIMO
+  CONFIDENZIALE
 }
 
 // Stato cliente (coerente col public)
@@ -89,6 +96,37 @@ enum UserTokenType {
 ////////////////////////////////////////////////////
 // MODELS
 ////////////////////////////////////////////////////
+
+// Lookup per-tenant: Reparti
+model Department {
+  id        String   @id @default(cuid())
+  clientId  String
+  name      String
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categories Category[]
+
+  @@index([clientId, active, sortOrder])
+}
+
+// Lookup per-tenant: Categorie (per reparto)
+model Category {
+  id           String     @id @default(cuid())
+  clientId     String
+  departmentId String
+  name         String
+  active       Boolean    @default(true)
+  sortOrder    Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  department Department @relation(fields: [departmentId], references: [id])
+
+  @@index([clientId, departmentId, active, sortOrder])
+}
 
 // Azienda cliente (tenant)
 model Client {
@@ -188,15 +226,27 @@ model WhistleReport {
   inProgressAt  DateTime?
   finalClosedAt DateTime?
 
+  // Campi public form
+  eventDate   DateTime     @default(now())
+  privacy     ReporterPrivacy @default(ANONIMO)
+  departmentId String?
+  categoryId   String?
+  containsPIISuspected Boolean @default(false)
+  ipHash      String?     @db.VarChar(128)
+  ua          String?
+  retentionAt DateTime?
+
   internalUserId String?
   internalUser   InternalUser? @relation("UserReports", fields: [internalUserId], references: [id])
 
   publicUsers PublicUser[]
   messages    ReportMessage[]
   statusLogs  ReportStatusHistory[]
+  attachments ReportAttachment[]
 
   @@index([clientId])
   @@index([status])
+  @@index([clientId, publicCode])
 }
 
 // Messaggi delle segnalazioni
@@ -216,8 +266,20 @@ model ReportMessage {
   authorId String?
   user     InternalUser? @relation("UserMessages", fields: [authorId], references: [id])
 
+  // Visibilità del messaggio
+  visibility MessageVisibility @default(INTERNAL)
+
   @@index([reportId])
   @@index([clientId])
+  @@index([reportId, createdAt])
+  @@index([reportId, visibility])
+}
+
+// Visibilità dei messaggi
+enum MessageVisibility {
+  PUBLIC
+  INTERNAL
+  SYSTEM
 }
 
 // Storico cambi di stato
@@ -237,6 +299,21 @@ model ReportStatusHistory {
   @@index([reportId])
   @@index([clientId])
   @@index([status])
+}
+
+// Metadati allegati dei report (upload via presign)
+model ReportAttachment {
+  id         String   @id @default(cuid())
+  reportId   String
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  storageKey String
+  createdAt  DateTime @default(now())
+
+  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
 }
 
 // --- NEW: Token di invito/reset split (selector + tokenHash) ---

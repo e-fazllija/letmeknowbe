@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsString } from 'class-validator';
-import { ReportStatus } from '../../../generated/tenant';
+import { IsOptional, IsString } from 'class-validator';
+// Nota: accettiamo valori testuali per includere anche NEED_INFO senza dipendere dalla rigenerazione del client
+export const REPORT_STATUS_VALUES = ['OPEN', 'IN_PROGRESS', 'SUSPENDED', 'NEED_INFO', 'CLOSED'] as const;
 
 
 export class CreateReportStatusDto {
@@ -25,10 +26,10 @@ export class CreateReportStatusDto {
   agentId?: string;
 
   @ApiProperty({
-    enum: ReportStatus,
-    description: 'Nuovo stato del report (OPEN, IN_PROGRESS, CLOSED)',
+    enum: REPORT_STATUS_VALUES,
+    description: 'Nuovo stato del report (OPEN, IN_PROGRESS, SUSPENDED, NEED_INFO, CLOSED)',
   })
-  @IsEnum(ReportStatus)
-  status!: ReportStatus
+  @IsString()
+  status!: string;
 }
  

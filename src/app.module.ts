@@ -10,6 +10,8 @@ import { ClientModule } from './public/client/client.module';
 import { SubscriptionModule } from './public/subscription/subscription.module';
 import { PublicAuthModule } from './public/auth/public-auth.module';
 import { PlatformModule } from './platform/platform.module';
+import { PublicReportModule } from './public/report/public-report.module';
+import { PublicVoiceModule } from './public/voice/public-voice.module';
 
 @Module({
   imports: [
@@ -22,6 +24,8 @@ import { PlatformModule } from './platform/platform.module';
     ]),
     PlatformModule,
     PublicAuthModule,
+    PublicReportModule,
+    PublicVoiceModule,
     ClientModule,
     SubscriptionModule,
     TenantAuthModule,

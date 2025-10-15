@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
+import { json, urlencoded } from 'express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 
@@ -12,8 +13,31 @@ async function bootstrap() {
   app.use(helmet());
   app.use(cookieParser());
 
+  // Body size limits (allegati via presign, non via body)
+  app.use(json({ limit: '1mb' }));
+  app.use(urlencoded({ extended: true, limit: '1mb' }));
+
   // Abilita CORS (tutti gli origin, utile per test)
-  app.enableCors({ origin: true, credentials: true });
+  const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+  const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const corsOrigin: any = isProd && allowedOrigins.length > 0
+    ? (origin: string | undefined, cb: (err: Error | null, ok?: boolean) => void) => {
+        if (!origin) return cb(null, true);
+        if (allowedOrigins.includes(origin)) return cb(null, true);
+        return cb(new Error('Not allowed by CORS'));
+      }
+    : true;
+
+  // In produzione non esponiamo/accettiamo x-tenant-id dal browser
+  app.enableCors({
+    origin: corsOrigin,
+    credentials: true,
+    allowedHeaders: isProd ? ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'] : undefined,
+  });
 
   // Cookie parser per gestire refresh token HttpOnly
 

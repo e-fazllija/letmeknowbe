@@ -57,32 +57,32 @@ export class TenantAuthController {
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 300 } })
   @ApiOperation({ summary: 'Genera un segreto TOTP per abilitare la MFA' })
-  @ApiHeader({ name: 'Authorization', description: 'Bearer <setup_token>' })
-  mfaSetup(@Headers('authorization') authorization: string) {
-    return this.service.generateMfaSetup(authorization);
+  @ApiHeader({ name: 'x-mfa-token', required: true, description: 'Setup token (oppure Bearer <setup_token>)' })
+  mfaSetup(@Headers('x-mfa-token') mfaToken: string) {
+    return this.service.generateMfaSetup(mfaToken);
   }
 
   @Post('mfa/verify')
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 300 } })
   @ApiOperation({ summary: 'Verifica il codice TOTP e abilita la MFA' })
-  @ApiHeader({ name: 'Authorization', description: 'Bearer <setup_token>' })
-  mfaVerify(@Headers('authorization') authorization: string, @Body() dto: MfaCodeDto) {
-    return this.service.verifyMfaSetup(authorization, dto);
+  @ApiHeader({ name: 'x-mfa-token', required: true, description: 'Setup token (oppure Bearer <setup_token>)' })
+  mfaVerify(@Headers('x-mfa-token') mfaToken: string, @Body() dto: MfaCodeDto) {
+    return this.service.verifyMfaSetup(mfaToken, dto);
   }
 
   @Post('mfa/complete')
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 300 } })
   @ApiOperation({ summary: 'Completa il login MFA con un codice TOTP valido' })
-  @ApiHeader({ name: 'Authorization', description: 'Bearer <mfa_token>' })
+  @ApiHeader({ name: 'x-mfa-token', required: true, description: 'MFA token (oppure Bearer <mfa_token>)' })
   async mfaComplete(
-    @Headers('authorization') authorization: string,
+    @Headers('x-mfa-token') mfaToken: string,
     @Body() dto: MfaCodeDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.service.completeMfa(authorization, dto, req);
+    const result = await this.service.completeMfa(mfaToken, dto, req);
     this.service.setRefreshCookie(res, result.refreshToken);
     return {
       message: 'Login completato con successo',
@@ -95,14 +95,14 @@ export class TenantAuthController {
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: 300 } })
   @ApiOperation({ summary: 'Completa il login MFA usando un codice di recupero' })
-  @ApiHeader({ name: 'Authorization', description: 'Bearer <mfa_token>' })
+  @ApiHeader({ name: 'x-mfa-token', required: true, description: 'MFA token (oppure Bearer <mfa_token>)' })
   async mfaRecovery(
-    @Headers('authorization') authorization: string,
+    @Headers('x-mfa-token') mfaToken: string,
     @Body() dto: MfaRecoveryDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.service.completeMfaWithRecovery(authorization, dto, req);
+    const result = await this.service.completeMfaWithRecovery(mfaToken, dto, req);
     this.service.setRefreshCookie(res, result.refreshToken);
     return {
       message: 'Login completato con codice di recupero',
