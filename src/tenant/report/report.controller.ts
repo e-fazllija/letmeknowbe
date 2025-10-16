@@ -1,12 +1,14 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ReportService } from './report.service';
-import { CreateReportDto } from './dto/create-report.dto';
-import { CreateReportMessageDto } from './dto/create-report-message.dto';
+// import { CreateReportDto } from './dto/create-report.dto';
+// import { CreateReportMessageDto } from './dto/create-report-message.dto';
 import { CreateReportStatusDto } from './dto/create-report-status.dto';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Request } from 'express';
 import { CreateTenantReportDto } from './dto/create-tenant-report.dto';
+import { CreateTenantMessageDto, TenantMessageVisibility } from './dto/create-tenant-message.dto';
+import { RequestInfoDto } from './dto/request-info.dto';
 
 @ApiTags('Tenant - Segnalazioni')
 @Controller('tenant/reports')
@@ -39,19 +41,37 @@ export class ReportController {
     return this.service.listReports(clientId);
   }
 
-  // AGGIUNGE UN MESSAGGIO
+  // AGGIUNGE UNA NOTA (INTERNAL) O UN MESSAGGIO (PUBLIC) AL REPORT
   @Post('message')
-  @ApiOperation({ summary: 'Aggiunge un messaggio a una segnalazione' })
-  addMessage(@Body() dto: CreateReportMessageDto) {
-    return this.service.addMessage(dto);
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Aggiunge una nota interna (INTERNAL) o un messaggio pubblico (PUBLIC) al report' })
+  @ApiBody({
+    type: CreateTenantMessageDto,
+    examples: {
+      notaInterna: {
+        summary: 'Nota interna (non visibile al segnalante)',
+        value: { reportId: 'rep_cuid_123', body: 'Promemoria per il team', visibility: 'INTERNAL' },
+      },
+      messaggioPubblico: {
+        summary: 'Messaggio al segnalante (visibile pubblicamente)',
+        value: { reportId: 'rep_cuid_123', body: 'Per favore indica data e luogo dell\'evento', visibility: 'PUBLIC' },
+      },
+    },
+  })
+  addMessage(@Req() req: Request, @Body() dto: CreateTenantMessageDto) {
+    return this.service.addTenantMessage(req, dto);
   }
 
   // ELENCO MESSAGGI DI UNA SEGNALAZIONE
   @Get(':reportId/messages')
-  @ApiOperation({ summary: 'Elenco messaggi di una segnalazione' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Elenco messaggi di una segnalazione (tenant)' })
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
-  listMessages(@Param('reportId') reportId: string) {
-    return this.service.listMessages(reportId);
+  @ApiQuery({ name: 'visibility', required: false, description: 'ALL | PUBLIC | INTERNAL | SYSTEM | CSV (es. PUBLIC,INTERNAL)' })
+  listMessages(@Req() req: Request, @Param('reportId') reportId: string, @Query('visibility') visibility?: string) {
+    return this.service.listMessagesTenant(req, reportId, visibility);
   }
 
   // PATCH — AGGIORNA STATO DEL REPORT
@@ -66,9 +86,11 @@ export class ReportController {
 
 // PATCH — aggiorna la nota interna di un messaggio
 @Patch(':reportId/message/:messageId/note')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('access-token')
 @ApiOperation({
-  summary: 'Aggiorna la nota interna di un messaggio',
-  description: 'Permette ad admin o agent di aggiornare note riservate interne a un messaggio.',
+  summary: 'Aggiorna la nota di un messaggio (solo INTERNAL)',
+  description: 'Consente update solo per messaggi INTERNAL. PUBLIC/SYSTEM → 403.',
 })
 @ApiParam({ name: 'reportId', description: 'ID del report' })
 @ApiParam({ name: 'messageId', description: 'ID del messaggio' })
@@ -82,18 +104,21 @@ export class ReportController {
   },
 })
 updateMessageNote(
+  @Req() req: Request,
   @Param('reportId') reportId: string,
   @Param('messageId') messageId: string,
   @Body('note') note: string,
 ) {
-  return this.service.updateMessageNote(reportId, messageId, note);
+  return this.service.updateMessageNoteTenant(req, reportId, messageId, note);
 }
 
 // PATCH — aggiorna il contenuto (body) del messaggio
 @Patch(':reportId/message/:messageId/body')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth('access-token')
 @ApiOperation({
-  summary: 'Aggiorna il contenuto (body) di un messaggio',
-  description: 'Permette ad admin o agent di modificare il testo visibile del messaggio.',
+  summary: 'Aggiorna il contenuto (body) di un messaggio (solo INTERNAL)',
+  description: 'Consente update solo per messaggi INTERNAL. PUBLIC/SYSTEM → 403.',
 })
 @ApiParam({ name: 'reportId', description: 'ID del report' })
 @ApiParam({ name: 'messageId', description: 'ID del messaggio' })
@@ -107,11 +132,12 @@ updateMessageNote(
   },
 })
 updateMessageBody(
+  @Req() req: Request,
   @Param('reportId') reportId: string,
   @Param('messageId') messageId: string,
   @Body('body') body: string,
 ) {
-  return this.service.updateMessageBody(reportId, messageId, body);
+  return this.service.updateMessageBodyTenant(req, reportId, messageId, body);
 }
 
   // DELETE — ELIMINA UNA SEGNALAZIONE COMPLETA
@@ -122,6 +148,28 @@ updateMessageBody(
   })
   deleteReport(@Param('reportId') reportId: string) {
     return this.service.deleteReport(reportId);
+  }
+
+  // AZIONE RAPIDA: Richiesta chiarimenti (set NEED_INFO + messaggio pubblico)
+  @Post(':reportId/request-info')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({
+    summary: 'Richiedi chiarimenti al segnalante',
+    description: 'Imposta lo stato a NEED_INFO (con audit SYSTEM) e invia un messaggio PUBLIC al segnalante.',
+  })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  @ApiBody({
+    type: RequestInfoDto,
+    examples: {
+      richiesta: {
+        summary: 'Esempio richiesta',
+        value: { message: 'Puoi indicare data e luogo dell\'evento?', note: 'Mancano dettagli minimi' },
+      },
+    },
+  })
+  requestInfo(@Req() req: Request, @Param('reportId') reportId: string, @Body() dto: RequestInfoDto) {
+    return this.service.requestInfo(req, reportId, dto);
   }
 }
 

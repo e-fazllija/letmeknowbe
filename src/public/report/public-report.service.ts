@@ -4,6 +4,7 @@ import { CreatePublicReportDto } from './dto/create-public-report.dto';
 import { Request } from 'express';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
+import { PublicReplyDto } from './dto/public-reply.dto';
 
 const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain']);
 const EXT_FOR_MIME: Record<string, string[]> = {
@@ -250,5 +251,102 @@ export class PublicReportService {
     if (!report) throw new BadRequestException('Impossibile creare la segnalazione, riprovare');
 
     return { reportId: report.id, publicCode: publicCode.toUpperCase(), secret: secretRaw, createdAt: report.createdAt };
+  }
+
+  /**
+   * Replica del segnalante a una richiesta di chiarimenti
+   */
+  async reply(tenantId: string, dto: PublicReplyDto, req: Request, includeThread = false) {
+    if (!tenantId) throw new BadRequestException('Richiesta non valida');
+
+    const presignEnabled = isTrue(process.env.PRESIGN_ENABLED);
+    const maxFiles = parseInt(process.env.ATTACH_MAX_FILES || '3', 10);
+    const maxFileBytes = toBytes(parseInt(process.env.ATTACH_MAX_FILE_MB || '10', 10));
+    const maxTotalBytes = toBytes(parseInt(process.env.ATTACH_MAX_TOTAL_MB || '20', 10));
+
+    const attachments = dto.attachments || [];
+    if (attachments.length > 0 && !presignEnabled) {
+      throw new BadRequestException('Allegati non consentiti');
+    }
+    if (attachments.length > maxFiles) {
+      throw new PayloadTooLargeException('Troppe parti allegate');
+    }
+    let total = 0;
+    for (const a of attachments) {
+      if (!ALLOWED_MIME.has(a.mimeType)) throw new BadRequestException('Tipo file non consentito');
+      const ext = getExt(a.fileName);
+      const allowedExt = EXT_FOR_MIME[a.mimeType] || [];
+      if (!allowedExt.includes(ext)) throw new BadRequestException('Estensione incoerente con MIME');
+      if (!a.storageKey || !a.storageKey.startsWith(`${tenantId}/`)) throw new BadRequestException('storageKey non valido');
+      if (a.sizeBytes > maxFileBytes) throw new PayloadTooLargeException('File oltre il limite');
+      total += a.sizeBytes || 0;
+      if (total > maxTotalBytes) throw new PayloadTooLargeException('Dimensione totale oltre il limite');
+    }
+
+    // Lookup report by (tenantId, publicCode) and verify secret with bcrypt+pepper
+    const publicCode = (dto.publicCode || '').toUpperCase();
+    const report = await this.prisma.whistleReport.findFirst({ where: { clientId: tenantId, publicCode } });
+    if (!report) throw new NotFoundException('Risorsa non trovata');
+
+    const pepper = process.env.REPORT_SECRET_PEPPER || 'dev_report_pepper';
+    const ok = await bcrypt.compare(dto.secret + pepper, report.secretHash);
+    if (!ok) throw new NotFoundException('Risorsa non trovata');
+
+    // PII soft-check on reply body
+    const piiEnabled = isTrue(process.env.PII_CHECK_ENABLED);
+    if (piiEnabled && detectPii(dto.body)) {
+      await this.prisma.whistleReport.update({ where: { id: report.id }, data: { containsPIISuspected: true } });
+    }
+
+    // Create PUBLIC message from whistleblower
+    const msg = await this.prisma.reportMessage.create({
+      data: {
+        clientId: tenantId,
+        reportId: report.id,
+        author: 'SEGNALANTE',
+        body: dto.body,
+        visibility: 'PUBLIC' as any,
+      },
+    });
+
+    if (attachments.length > 0) {
+      await this.prisma.reportAttachment.createMany({
+        data: attachments.map((a) => ({
+          reportId: report.id,
+          fileName: a.fileName,
+          mimeType: a.mimeType,
+          sizeBytes: a.sizeBytes,
+          storageKey: a.storageKey,
+        })),
+      });
+    }
+
+    let newStatus: string | undefined;
+    if ((report as any).status === 'NEED_INFO') {
+      // auto transition to IN_PROGRESS + audit + system message
+      const now = new Date();
+      await this.prisma.$transaction([
+        this.prisma.whistleReport.update({ where: { id: report.id }, data: { status: 'IN_PROGRESS' as any, inProgressAt: now } }),
+        this.prisma.reportStatusHistory.create({
+          data: { clientId: tenantId, reportId: report.id, status: 'IN_PROGRESS' as any, author: 'WB_REPLY', note: 'Replica ricevuta' },
+        }),
+        this.prisma.reportMessage.create({
+          data: { clientId: tenantId, reportId: report.id, author: 'system', body: 'Replica ricevuta dal segnalante', visibility: 'SYSTEM' as any },
+        }),
+      ]);
+      newStatus = 'IN_PROGRESS';
+    }
+
+    if (!includeThread) {
+      return { messageId: msg.id, createdAt: msg.createdAt, ...(newStatus ? { newStatus } : {}) };
+    }
+
+    const thread = await this.prisma.reportMessage.findMany({
+      where: { reportId: report.id, visibility: 'PUBLIC' as any },
+      select: { id: true, author: true, body: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return { messageId: msg.id, createdAt: msg.createdAt, ...(newStatus ? { newStatus } : {}), thread };
   }
 }

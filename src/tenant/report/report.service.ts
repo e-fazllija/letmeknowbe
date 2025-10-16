@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, ForbiddenException } from '@nestjs/common';
 import { PrismaTenantService } from '../prisma-tenant.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { CreateReportMessageDto } from './dto/create-report-message.dto';
@@ -7,6 +7,7 @@ import * as crypto from 'crypto';
 import { ReportStatus } from '../../generated/tenant';
 import * as bcrypt from 'bcryptjs';
 import { Request } from 'express';
+import { RequestInfoDto } from './dto/request-info.dto';
 
 // Helper locale: aggiunge giorni a una data
 function addDays(base: Date, days: number): Date {
@@ -261,6 +262,61 @@ export class ReportService {
   }
 
   /**
+   * TENANT: aggiunge nota (INTERNAL) o messaggio (PUBLIC) al report
+   */
+  async addTenantMessage(req: any, dto: { reportId: string; body: string; visibility?: string }) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+
+    // Scoping report
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: dto.reportId, clientId: tenantId }, select: { id: true } });
+    if (!report) throw new NotFoundException('Risorsa non trovata');
+
+    const vis = ((dto.visibility || 'INTERNAL').toUpperCase()) as 'PUBLIC' | 'INTERNAL';
+    if (vis !== 'PUBLIC' && vis !== 'INTERNAL') {
+      throw new BadRequestException('Visibility non valida');
+    }
+
+    const authorDisplay = vis === 'PUBLIC' ? 'AGENTE' : (req?.user?.email || 'AGENTE');
+
+    const message = await this.prisma.reportMessage.create({
+      data: {
+        clientId: tenantId,
+        reportId: dto.reportId,
+        author: authorDisplay,
+        authorId: userId,
+        body: dto.body,
+        visibility: vis as any,
+      },
+    });
+
+    return { message: 'Messaggio aggiunto con successo', item: message };
+  }
+
+  /**
+   * TENANT: lista messaggi con filtro visibility
+   */
+  async listMessagesTenant(req: any, reportId: string, visibility?: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+
+    // Scoping report
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { id: true } });
+    if (!report) throw new NotFoundException('Risorsa non trovata');
+
+    let filter: any = { reportId, clientId: tenantId };
+    if (visibility && visibility.toUpperCase() !== 'ALL') {
+      const parts = visibility.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+      const allowed = ['PUBLIC', 'INTERNAL', 'SYSTEM'];
+      const selected = parts.filter((p) => allowed.includes(p));
+      if (selected.length > 0) filter.visibility = { in: selected as any };
+    }
+
+    return this.prisma.reportMessage.findMany({ where: filter, orderBy: { createdAt: 'asc' } });
+  }
+
+  /**
    * PATCH — aggiorna lo stato della segnalazione
    */
   async updateStatus(reportId: string, dto: CreateReportStatusDto) {
@@ -331,42 +387,30 @@ export class ReportService {
 * PATCH — aggiorna la nota interna di un messaggio
 * (solo admin/agent)
 */
-async updateMessageNote(reportId: string, messageId: string, note: string) {
-  const message = await this.prisma.reportMessage.findFirst({
-    where: { id: messageId, reportId },
-  });
+async updateMessageNoteTenant(req: any, reportId: string, messageId: string, note: string) {
+  const tenantId = req?.user?.clientId as string | undefined;
+  if (!tenantId) throw new BadRequestException('Tenant non valido');
+  const message = await this.prisma.reportMessage.findFirst({ where: { id: messageId, reportId, clientId: tenantId } });
   if (!message) throw new NotFoundException('Messaggio non trovato');
+  if ((message as any).visibility !== 'INTERNAL') throw new ForbiddenException('Non è consentito modificare questo messaggio');
 
-  const updatedMessage = await this.prisma.reportMessage.update({
-    where: { id: messageId },
-    data: { note },
-  });
-
-  return {
-    message: 'Nota del messaggio aggiornata con successo',
-    updatedMessage,
-  };
+  const updatedMessage = await this.prisma.reportMessage.update({ where: { id: messageId }, data: { note } });
+  return { message: 'Nota del messaggio aggiornata con successo', updatedMessage };
 }
 
 /**
 * PATCH — aggiorna il contenuto (body) del messaggio
 * (solo admin/agent)
 */
-async updateMessageBody(reportId: string, messageId: string, body: string) {
-  const message = await this.prisma.reportMessage.findFirst({
-    where: { id: messageId, reportId },
-  });
+async updateMessageBodyTenant(req: any, reportId: string, messageId: string, body: string) {
+  const tenantId = req?.user?.clientId as string | undefined;
+  if (!tenantId) throw new BadRequestException('Tenant non valido');
+  const message = await this.prisma.reportMessage.findFirst({ where: { id: messageId, reportId, clientId: tenantId } });
   if (!message) throw new NotFoundException('Messaggio non trovato');
+  if ((message as any).visibility !== 'INTERNAL') throw new ForbiddenException('Non è consentito modificare questo messaggio');
 
-  const updatedMessage = await this.prisma.reportMessage.update({
-    where: { id: messageId },
-    data: { body },
-  });
-
-  return {
-    message: 'Contenuto del messaggio aggiornato con successo',
-    updatedMessage,
-  };
+  const updatedMessage = await this.prisma.reportMessage.update({ where: { id: messageId }, data: { body } });
+  return { message: 'Contenuto del messaggio aggiornato con successo', updatedMessage };
 }
 
 
@@ -382,6 +426,43 @@ async updateMessageBody(reportId: string, messageId: string, body: string) {
     await this.prisma.whistleReport.delete({ where: { id: reportId } });
 
     return { message: 'Segnalazione eliminata con successo', id: reportId };
+  }
+
+  /**
+   * TENANT: Richiesta chiarimenti (NEED_INFO + messaggio PUBLIC)
+   */
+  async requestInfo(req: any, reportId: string, dto: RequestInfoDto) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    const authorEmail = req?.user?.email as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId } });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+
+    // Aggiorna stato a NEED_INFO (crea anche messaggio SYSTEM via updateStatus)
+    await this.updateStatus(reportId, {
+      clientId: tenantId,
+      reportId,
+      status: 'NEED_INFO' as any,
+      note: dto.note,
+      author: authorEmail || 'system',
+      agentId: userId,
+    } as any);
+
+    // Messaggio pubblico al segnalante
+    const pub = await this.prisma.reportMessage.create({
+      data: {
+        clientId: tenantId,
+        reportId,
+        author: 'AGENTE',
+        authorId: userId,
+        body: dto.message,
+        visibility: 'PUBLIC' as any,
+      },
+    });
+
+    return { message: 'Richiesta chiarimenti inviata', status: 'NEED_INFO', publicMessageId: pub.id };
   }
 }
 

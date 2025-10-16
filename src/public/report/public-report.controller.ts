@@ -6,6 +6,7 @@ import { PublicReportService } from './public-report.service';
 import { CreatePublicReportDto } from './dto/create-public-report.dto';
 import { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
+import { PublicReplyDto } from './dto/public-reply.dto';
 
 @ApiTags('Public - Reports')
 @ApiSecurity('tenant-key')
@@ -33,6 +34,21 @@ export class PublicReportController {
   @Throttle({ default: { limit: 5, ttl: 300 } })
   createReport(@TenantId() tenantId: string, @Body() dto: CreatePublicReportDto, @Req() req: Request) {
     return this.service.createReport(tenantId, dto, req);
+  }
+
+  @Post('reports/reply')
+  @ApiOperation({ summary: 'Replica del segnalante (PUBLIC)', description: 'Verifica publicCode + secret. Allegati consentiti solo con presign abilitato. Limiti: max 3 allegati, ≤10MB ciascuno, ≤20MB totali.' })
+  @ApiQuery({ name: 'includeThread', required: false, description: 'Se true, include il thread PUBLIC aggiornato nella risposta' })
+  @ApiBody({ type: PublicReplyDto })
+  @Throttle({ default: { limit: 5, ttl: 300 } })
+  reply(
+    @TenantId() tenantId: string,
+    @Body() dto: PublicReplyDto,
+    @Req() req: Request,
+    @Query('includeThread') includeThread?: string,
+  ) {
+    const withThread = (includeThread || '').toLowerCase() === 'true';
+    return this.service.reply(tenantId, dto, req, withThread);
   }
 
   @Post('reports/attachments/presign')

@@ -33,10 +33,14 @@ async function bootstrap() {
     : true;
 
   // In produzione non esponiamo/accettiamo x-tenant-id dal browser
+  // Autorizziamo esplicitamente Authorization (necessario per MFA bearer) e, in dev, anche header custom usati dal FE
+  const baseAllowed = ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'];
+  const allowedHeaders = isProd ? baseAllowed : [...baseAllowed, 'x-tenant-id', 'x-mfa-token'];
   app.enableCors({
     origin: corsOrigin,
     credentials: true,
-    allowedHeaders: isProd ? ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'] : undefined,
+    allowedHeaders,
+    exposedHeaders: ['x-mfa-token', 'x-auth-mfa'],
   });
 
   // Cookie parser per gestire refresh token HttpOnly
