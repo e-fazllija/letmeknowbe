@@ -1,5 +1,5 @@
 import { Body, Controller, Post, Req, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { TenantContextGuard } from '../../common/tenant/tenant-context.guard';
 import { TenantId } from '../../common/tenant/tenant.decorator';
 import { PublicVoiceService } from './public-voice.service';
@@ -23,6 +23,7 @@ export class PublicVoiceController {
 
   @Post('reports')
   @ApiOperation({ summary: 'Crea una segnalazione vocale (audio allegato, trascrizione async futura)' })
+  @ApiBody({ type: CreateVoiceReportDto })
   @Throttle({ default: { limit: 5, ttl: 300 } })
   create(@TenantId() tenantId: string, @Body() dto: CreateVoiceReportDto, @Req() req: Request) {
     return this.service.createVoiceReport(tenantId, dto, req);

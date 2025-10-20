@@ -23,6 +23,12 @@ function normalizeCode(): string {
 }
 function base64url(buf: Buffer) { return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''); }
 function hmacSha256Hex(key: string, data: string) { return crypto.createHmac('sha256', key).update(data).digest('hex'); }
+function detectPii(text: string) {
+  if (!text) return false;
+  const email = /\b[\w.%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/;
+  const phone = /(?:(?:\+|00)\d{1,3}[\s.-]?)?(?:\(?\d{2,4}\)?[\s.-]?)?\d{3,4}[\s.-]?\d{3,4}/;
+  return email.test(text) || phone.test(text);
+}
 
 @Injectable()
 export class PublicVoiceService {
@@ -86,6 +92,10 @@ export class PublicVoiceService {
     const ipHash = ip ? hmacSha256Hex(ipPepper, ip) : undefined;
     const ua = (req.headers['user-agent'] as string) || undefined;
 
+    // PII soft-check
+    const piiEnabled = isTrue(process.env.PII_CHECK_ENABLED);
+    const containsPII = piiEnabled && (detectPii(subject) || detectPii(summary));
+
     let report: any;
     let publicCode = '';
     for (let i = 0; i < 5; i++) {
@@ -101,11 +111,12 @@ export class PublicVoiceService {
               title: subject,
               summary,
               createdAt: now,
-              channel: 'WEB' as any,
+              channel: 'OTHER' as any,
               eventDate,
               privacy: privacy as any,
               departmentId: dto.departmentId,
               categoryId: dto.categoryId,
+              containsPIISuspected: !!containsPII,
               ipHash,
               ua,
             },

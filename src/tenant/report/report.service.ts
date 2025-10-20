@@ -8,6 +8,7 @@ import { ReportStatus } from '../../generated/tenant';
 import * as bcrypt from 'bcryptjs';
 import { Request } from 'express';
 import { RequestInfoDto } from './dto/request-info.dto';
+import { VoiceTranscriptDto } from './dto/voice-transcript.dto';
 
 // Helper locale: aggiunge giorni a una data
 function addDays(base: Date, days: number): Date {
@@ -463,6 +464,33 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
     });
 
     return { message: 'Richiesta chiarimenti inviata', status: 'NEED_INFO', publicMessageId: pub.id };
+  }
+
+  /**
+   * TENANT: aggiunge una trascrizione (nota INTERNAL)
+   */
+  async addVoiceTranscript(req: any, reportId: string, dto: VoiceTranscriptDto) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    const authorEmail = req?.user?.email as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId } });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+
+    const msg = await this.prisma.reportMessage.create({
+      data: {
+        clientId: tenantId,
+        reportId,
+        author: authorEmail || 'AGENTE',
+        authorId: userId,
+        body: dto.transcript,
+        visibility: 'INTERNAL' as any,
+        note: 'Trascrizione audio',
+      },
+    });
+
+    return { message: 'Trascrizione aggiunta', item: msg };
   }
 }
 

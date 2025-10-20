@@ -9,6 +9,7 @@ import { Request } from 'express';
 import { CreateTenantReportDto } from './dto/create-tenant-report.dto';
 import { CreateTenantMessageDto, TenantMessageVisibility } from './dto/create-tenant-message.dto';
 import { RequestInfoDto } from './dto/request-info.dto';
+import { VoiceTranscriptDto } from './dto/voice-transcript.dto';
 
 @ApiTags('Tenant - Segnalazioni')
 @Controller('tenant/reports')
@@ -170,6 +171,17 @@ updateMessageBody(
   })
   requestInfo(@Req() req: Request, @Param('reportId') reportId: string, @Body() dto: RequestInfoDto) {
     return this.service.requestInfo(req, reportId, dto);
+  }
+
+  // TENANT: carica trascrizione manuale (nota INTERNAL)
+  @Post(':reportId/voice/transcript')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Aggiunge una trascrizione audio (INTERNAL)', description: 'Crea un messaggio INTERNAL con il testo della trascrizione' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  @ApiBody({ type: VoiceTranscriptDto })
+  addTranscript(@Req() req: Request, @Param('reportId') reportId: string, @Body() dto: VoiceTranscriptDto) {
+    return this.service.addVoiceTranscript(req, reportId, dto);
   }
 }
 
