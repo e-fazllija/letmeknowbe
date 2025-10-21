@@ -83,6 +83,41 @@ Risposta attesa: 501 (Not Implemented) se `PRESIGN_ENABLED=false`.
   - POST `/v1/public/voice/attachments/presign` → 501 se presign disabilitato
   - POST `/v1/public/voice/reports` → crea report con allegati audio (richiede presign attivo)
 
+6) Stato pubblico (publicCode + secret)
+```
+curl -sS -H "x-tenant-id: TENANT_ID" \
+  "http://localhost:3000/v1/public/reports/status?publicCode=R-XXXX-YYYY&secret=<SECRET>"
+```
+Risposta 200: `{ message: 'Segnalazione trovata', report: { id, publicCode, status, title, summary, createdAt, updatedAt, eventDate, privacy, channel, messages: [ { id, author, body, createdAt } ] } }`.
+
+Presign DEV (MOCK)
+- Abilita: `PRESIGN_ENABLED=true` e `PRESIGN_MODE=MOCK` in `.env`.
+- Opzionale: `PRESIGN_PROOF_REQUIRED=true` abilita la verifica HMAC dello `storageKey` lato server. Imposta `PRESIGN_PROOF_SECRET`.
+- Public allegati:
+```
+curl -sS -X POST -H "x-tenant-id: TENANT_ID" -H "Content-Type: application/json" \
+  -d '{"files":[{"fileName":"allegato.pdf","mimeType":"application/pdf","sizeBytes":1234}]}' \
+  http://localhost:3000/v1/public/reports/attachments/presign
+```
+- Voice allegati:
+```
+curl -sS -X POST -H "x-tenant-id: TENANT_ID" -H "Content-Type: application/json" \
+  -d '{"files":[{"fileName":"audio.mp3","mimeType":"audio/mpeg","sizeBytes":524288}]}' \
+  http://localhost:3000/v1/public/voice/attachments/presign
+```
+- Risposta (entrambi):
+```
+{ "items": [ { "storageKey": "<tenant>/tmp/<uuid>.<ext>", "method": "PUT", "uploadUrl": "https://example.invalid/upload/<tenant>/tmp/<uuid>.<ext>", "headers": {"content-type": "..."}, "maxSizeBytes": 10485760, "expiresIn": 300, "proof": "<hmac>" } ] }
+```
+Nota: in MOCK non avviene alcun upload reale; usa solo per sviluppo UI.
+
+Attachments: proof HMAC (facoltativo)
+- Se `PRESIGN_PROOF_REQUIRED=true`, gli endpoint `POST /v1/public/reports` e `POST /v1/public/voice/reports` richiedono `attachments[].proof` con HMAC-SHA256 calcolato su `storageKey` usando `PRESIGN_PROOF_SECRET`.
+- In MOCK il `proof` viene già generato nella risposta del presign.
+
+Tenant reports: paginazione e filtri
+- `GET /v1/tenant/reports?clientId=<TENANT>&page=1&pageSize=20&status=OPEN,NEED_INFO&departmentId=...&categoryId=...&q=ricerca`
+
 Codici di stato
 - 200/201: OK
 - 400: validazione (es. allegati presenti con presign disabilitato)
@@ -131,6 +166,36 @@ Altri endpoint
 - `POST /v1/tenant/auth/logout` → revoca la sessione di refresh corrente
 - `GET /v1/tenant/auth/me` → profilo utente (richiede `Authorization: Bearer <accessToken>`)
 
+## Tenant Reports (Sicurezza & Uso)
+
+- Tutte le rotte sotto `GET/POST/PATCH/DELETE /v1/tenant/reports` richiedono `Authorization: Bearer <accessToken>`.
+- Scoping forte: il `clientId` nel token deve coincidere con il `clientId` della richiesta (query/body) e con quello dei dati a DB.
+- Esempi
+  - Lista report del tenant:
+    - `curl -sS -H "Authorization: Bearer <TOKEN>" "http://localhost:3000/v1/tenant/reports?clientId=<TENANT_ID>"`
+  - Aggiorna stato:
+    - `curl -sS -X PATCH -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+       -d '{"clientId":"<TENANT_ID>","reportId":"rep_...","status":"IN_PROGRESS"}' \
+       "http://localhost:3000/v1/tenant/reports/<REPORT_ID>/status"`
+  - Elimina report:
+    - `curl -sS -X DELETE -H "Authorization: Bearer <TOKEN>" "http://localhost:3000/v1/tenant/reports/<REPORT_ID>"`
+
+Dettaglio con auto-ack
+- `GET /v1/tenant/reports/:reportId` (JWT) imposta automaticamente `acknowledgeAt` alla prima lettura e calcola `dueAt = acknowledgeAt + RESPONSE_TTL_DAYS`.
+- Scrive anche un messaggio `SYSTEM` (nota `SLA_ACK_ON_VIEW`). Chiamate successive sono idempotenti (non ricreano l'ack).
+
+SLA Reminder (opzionale)
+- Abilita reminder con `SLA_REMINDER_ENABLED=true` (job giornaliero di default; override con `SLA_TIMER_MS`).
+- Configurazione:
+  - `ACK_TTL_DAYS=7` (default) → ricezione (ricevuta) entro 7 giorni
+  - `RESPONSE_TTL_DAYS=90` (default) → riscontro entro 90 giorni
+  - `ACK_REMIND_DAYS=2,3,7` → promemoria ack a 2/3/7 giorni (SYSTEM messages con note `SLA_ACK_REMINDER_DX`)
+  - `RESPONSE_REMIND_DAYS=30,60,80,90` → promemoria risposta (note `SLA_RESPONSE_REMINDER_DX`) e `SLA_OVERDUE` oltre scadenza
+
+Note
+- In dev, puoi continuare a passare `x-tenant-id` solo per le rotte public. Le rotte `tenant/reports` usano esclusivamente il JWT.
+- In caso di mismatch tra token e `clientId` di richiesta/dato, il server risponde `403 Forbidden`.
+
 ## CORS (Dev vs Prod)
 
 Dev (default)
@@ -159,3 +224,6 @@ Output atteso: `Access-Control-Allow-Headers` include `authorization` (e `x-mfa-
 - `COOKIE_DOMAIN` → dominio cookie refresh (in dev: `localhost`)
 - `API_BASE_URL`, `FRONTEND_BASE_URL` → URL base per FE/BE in locale
 - JWT/MFA: `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `ACCESS_TTL`, `REFRESH_TTL`, `JWT_MFA_SECRET`, `MFA_TOKEN_TTL`, `MFA_ISSUER`
+
+## Logging
+- `HTTP_LOG_ENABLED` → se true, stampa un log sintetico per ogni richiesta con `x-request-id`, metodo, URL, status e durata.

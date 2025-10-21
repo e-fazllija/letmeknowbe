@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsString, MaxLength, Min, Matches } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class PublicAttachmentDto {
   @ApiProperty({ example: 'prova.pdf' })
@@ -24,5 +24,10 @@ export class PublicAttachmentDto {
   @IsNotEmpty()
   @MaxLength(512)
   storageKey!: string;
-}
 
+  @ApiProperty({ example: 'hmac-sha256(storageKey)', required: false, description: 'Prova HMAC del presign per validazione server-side' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  proof?: string;
+}

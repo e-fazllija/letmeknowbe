@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ReportService } from './report.service';
 // import { CreateReportDto } from './dto/create-report.dto';
 // import { CreateReportMessageDto } from './dto/create-report-message.dto';
@@ -34,12 +34,56 @@ export class ReportController {
     return this.service.getReportByToken(token);
   }
 
+  // DETTAGLIO SEGNALAZIONE (TENANT) CON AUTO-ACK ALLA PRIMA LETTURA
+  @Get(':reportId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Dettaglio segnalazione (auto-ack alla prima lettura)' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  getDetail(@Req() req: Request, @Param('reportId') reportId: string) {
+    return this.service.getDetailAndAck(req, reportId);
+  }
+
   // ELENCO SEGNALAZIONI (PER CLIENT)
   @Get()
   @ApiOperation({ summary: 'Elenco segnalazioni per cliente (admin/agent)' })
   @ApiQuery({ name: 'clientId', required: true })
-  listReports(@Query('clientId') clientId: string) {
-    return this.service.listReports(clientId);
+  @ApiQuery({ name: 'page', required: false, description: 'Pagina (base 1)', schema: { type: 'integer', minimum: 1, default: 1 } })
+  @ApiQuery({ name: 'pageSize', required: false, description: 'Dimensione pagina (max 100)', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } })
+  @ApiQuery({ name: 'status', required: false, description: 'Filtra per stato (CSV: OPEN,IN_PROGRESS,...)' })
+  @ApiQuery({ name: 'departmentId', required: false })
+  @ApiQuery({ name: 'categoryId', required: false })
+  @ApiQuery({ name: 'q', required: false, description: 'Ricerca testuale su title/summary' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
+  listReports(
+    @Req() req: Request,
+    @Query('clientId') clientId: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('status') status?: string,
+    @Query('departmentId') departmentId?: string,
+    @Query('categoryId') categoryId?: string,
+    @Query('q') q?: string,
+  ) {
+    const tokenClientId = (req as any)?.user?.clientId as string | undefined;
+    if (!tokenClientId || tokenClientId !== clientId) {
+      // Log sintetico per audit senza esporre dati sensibili
+      // eslint-disable-next-line no-console
+      console.warn('listReports forbidden: token/clientId mismatch');
+      throw new ForbiddenException('Operazione non consentita');
+    }
+    const p = Math.max(parseInt(page || '1', 10) || 1, 1);
+    const psRaw = parseInt(pageSize || '20', 10) || 20;
+    const ps = Math.min(Math.max(psRaw, 1), 100);
+    return this.service.listReports(clientId, {
+      page: p,
+      pageSize: ps,
+      status,
+      departmentId,
+      categoryId,
+      q,
+    });
   }
 
   // AGGIUNGE UNA NOTA (INTERNAL) O UN MESSAGGIO (PUBLIC) AL REPORT
@@ -77,12 +121,20 @@ export class ReportController {
 
   // PATCH — AGGIORNA STATO DEL REPORT
   @Patch(':reportId/status')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Aggiorna lo stato della segnalazione',
     description: 'Aggiorna esclusivamente lo stato (OPEN, IN_PROGRESS, SUSPENDED, NEED_INFO, CLOSED). I timestamp vengono aggiornati per OPEN/IN_PROGRESS/CLOSED.',
   })
-  updateStatus(@Param('reportId') reportId: string, @Body() dto: CreateReportStatusDto) {
-    return this.service.updateStatus(reportId, dto);
+  updateStatus(@Req() req: Request, @Param('reportId') reportId: string, @Body() dto: CreateReportStatusDto) {
+    const tokenClientId = (req as any)?.user?.clientId as string | undefined;
+    if (!tokenClientId || tokenClientId !== dto.clientId) {
+      // eslint-disable-next-line no-console
+      console.warn('updateStatus forbidden: token/clientId mismatch');
+      throw new ForbiddenException('Operazione non consentita');
+    }
+    return this.service.updateStatus(req, reportId, dto);
   }
 
 // PATCH — aggiorna la nota interna di un messaggio
@@ -143,12 +195,14 @@ updateMessageBody(
 
   // DELETE — ELIMINA UNA SEGNALAZIONE COMPLETA
   @Delete(':reportId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Elimina una segnalazione',
     description: 'Rimuove la segnalazione e tutti i dati collegati (messaggi, utenti pubblici).',
   })
-  deleteReport(@Param('reportId') reportId: string) {
-    return this.service.deleteReport(reportId);
+  deleteReport(@Req() req: Request, @Param('reportId') reportId: string) {
+    return this.service.deleteReport(req, reportId);
   }
 
   // AZIONE RAPIDA: Richiesta chiarimenti (set NEED_INFO + messaggio pubblico)

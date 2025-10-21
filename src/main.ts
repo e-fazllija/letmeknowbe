@@ -5,9 +5,26 @@ import { ValidationPipe } from '@nestjs/common';
 import { json, urlencoded } from 'express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import * as crypto from 'crypto';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // Correlation ID / Request logging (lightweight)
+  app.use((req: any, res: any, next: any) => {
+    const rid = (req.headers['x-request-id'] as string) || (crypto as any).randomUUID?.() || crypto.randomBytes(16).toString('hex');
+    res.setHeader('x-request-id', rid);
+    req.requestId = rid;
+    const start = Date.now();
+    res.on('finish', () => {
+      const enabled = (process.env.HTTP_LOG_ENABLED || '').toLowerCase() === 'true' || process.env.HTTP_LOG_ENABLED === '1';
+      if (enabled) {
+        // eslint-disable-next-line no-console
+        console.info('http', { rid, method: req.method, url: req.originalUrl || req.url, status: res.statusCode, ms: Date.now() - start });
+      }
+    });
+    next();
+  });
 
   // Hardening base
   app.use(helmet());

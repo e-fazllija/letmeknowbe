@@ -34,11 +34,37 @@ function detectPii(text: string) {
 export class PublicVoiceService {
   constructor(private prisma: PrismaTenantService) {}
 
-  async presign(tenantId: string) {
+  async presign(tenantId: string, body?: any) {
     const presignEnabled = isTrue(process.env.PRESIGN_ENABLED);
     if (!presignEnabled) {
       // 501: presign non abilitato
       throw new NotImplementedException('Presign disabilitato');
+    }
+    const mode = (process.env.PRESIGN_MODE || '').toUpperCase();
+    if (mode === 'MOCK') {
+      const maxFileBytes = toBytes(parseInt(process.env.ATTACH_MAX_FILE_MB || '10', 10));
+      const proofSecret = process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
+      const makeItem = (file?: { fileName?: string; mimeType?: string; sizeBytes?: number }) => {
+        const id = (crypto as any).randomUUID ? (crypto as any).randomUUID() : crypto.randomBytes(16).toString('hex');
+        const extFromName = file?.fileName ? getExt(file.fileName) : '';
+        const extFromMime = file?.mimeType ? (EXT_FOR_MIME[file.mimeType]?.[0] || '') : '';
+        const ext = extFromName || extFromMime || '';
+        const storageKey = `${tenantId}/tmp/${id}${ext}`;
+        const mime = file?.mimeType || 'application/octet-stream';
+        const proof = hmacSha256Hex(proofSecret, storageKey);
+        return {
+          storageKey,
+          method: 'PUT',
+          uploadUrl: `https://example.invalid/upload/${encodeURIComponent(storageKey)}`,
+          headers: { 'content-type': mime },
+          maxSizeBytes: maxFileBytes,
+          expiresIn: 300,
+          proof,
+        };
+      };
+      // Body opzionale: { files: [{ fileName, mimeType, sizeBytes }] }
+      const items = Array.isArray(body?.files) && body.files.length > 0 ? body.files.map((f: any) => makeItem(f)) : [makeItem()];
+      return { items };
     }
     // Placeholder: integrazione storage non presente
     throw new NotImplementedException('Presign non implementato');
@@ -69,6 +95,14 @@ export class PublicVoiceService {
       const allowedExt = EXT_FOR_MIME[a.mimeType] || [];
       if (!allowedExt.includes(ext)) throw new BadRequestException('Estensione incoerente con MIME');
       if (!a.storageKey || !a.storageKey.startsWith(`${tenantId}/`)) throw new BadRequestException('storageKey non valido');
+      const requireProof = isTrue(process.env.PRESIGN_PROOF_REQUIRED);
+      if (requireProof) {
+        const proofSecret = process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
+        const expected = hmacSha256Hex(proofSecret, a.storageKey);
+        if (!a.proof || a.proof !== expected) {
+          throw new BadRequestException('proof non valida o mancante');
+        }
+      }
       if (a.sizeBytes > maxFileBytes) throw new PayloadTooLargeException('File oltre il limite');
       total += a.sizeBytes || 0;
       if (total > maxTotalBytes) throw new PayloadTooLargeException('Dimensione totale oltre il limite');
@@ -137,7 +171,7 @@ export class PublicVoiceService {
       } catch (e: any) {
         const code = e?.code || e?.meta?.code;
         const target = Array.isArray(e?.meta?.target) ? e.meta.target.join(',') : e?.meta?.target;
-        if (code === 'P2002' && (target?.includes('publicCode') || true)) continue;
+        if (code === 'P2002' && target?.includes('publicCode')) continue;
         throw e;
       }
     }

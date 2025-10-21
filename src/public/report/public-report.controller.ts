@@ -54,7 +54,16 @@ export class PublicReportController {
   @Post('reports/attachments/presign')
   @ApiOperation({ summary: 'Presign per upload allegati (stub: 501 se disabilitato/non implementato)' })
   @Throttle({ default: { limit: 5, ttl: 300 } })
-  presign(@TenantId() tenantId: string) {
-    return this.service.presign(tenantId);
+  presign(@TenantId() tenantId: string, @Body() body?: any) {
+    return this.service.presign(tenantId, body);
+  }
+
+  @Get('reports/status')
+  @ApiOperation({ summary: 'Stato pubblico della segnalazione', description: 'Richiede publicCode + secret; ritorna solo informazioni sicure e il thread PUBLIC.' })
+  @ApiQuery({ name: 'publicCode', required: true })
+  @ApiQuery({ name: 'secret', required: true })
+  @Throttle({ default: { limit: 10, ttl: 60 } })
+  publicStatus(@TenantId() tenantId: string, @Query('publicCode') publicCode: string, @Query('secret') secret: string) {
+    return this.service.publicStatus(tenantId, publicCode, secret);
   }
 }

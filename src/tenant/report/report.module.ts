@@ -5,11 +5,12 @@ import { ReportService } from './report.service';
 import { PrismaTenantService } from '../prisma-tenant.service';
 import { TenantModule } from '../tenant.module';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ReportSlaScheduler } from './report-sla.scheduler';
 
 @Module({
   imports: [TenantModule, JwtModule.register({})],
   controllers: [ReportController],
-  providers: [ReportService, JwtAuthGuard],
+  providers: [ReportService, JwtAuthGuard, ReportSlaScheduler],
   exports: [ReportService],
 })
 export class ReportModule {}

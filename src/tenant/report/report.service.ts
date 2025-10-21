@@ -28,6 +28,60 @@ export class ReportService {
   };
 
   /**
+   * Dettaglio report con auto-ack alla prima lettura (idempotente)
+   */
+  async getDetailAndAck(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+
+    let report = await this.prisma.whistleReport.findFirst({
+      where: { id: reportId, clientId: tenantId },
+      include: {
+        messages: {
+          select: { id: true, author: true, body: true, note: true, createdAt: true, visibility: true },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+
+    if (!report.acknowledgeAt) {
+      const now = new Date();
+      const responseDays = parseInt(process.env.RESPONSE_TTL_DAYS || '90', 10);
+      const dueAt = addDays(now, isNaN(responseDays) ? 90 : responseDays);
+      const repId = report.id;
+      const repClientId = report.clientId;
+      await this.prisma.$transaction(async (tx) => {
+        await tx.whistleReport.update({ where: { id: repId }, data: { acknowledgeAt: now, dueAt } });
+        await tx.reportMessage.create({
+          data: {
+            clientId: repClientId,
+            reportId: repId,
+            author: 'system',
+            body: 'Segnalazione presa in carico (visualizzata).',
+            note: 'SLA_ACK_ON_VIEW',
+            visibility: 'SYSTEM' as any,
+          },
+        });
+      });
+      // eslint-disable-next-line no-console
+      console.info('report acknowledged on view', { reportId });
+      // refresh snapshot
+      report = await this.prisma.whistleReport.findFirst({
+        where: { id: repId, clientId: tenantId },
+        include: {
+          messages: {
+            select: { id: true, author: true, body: true, note: true, createdAt: true, visibility: true },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      });
+    }
+
+    return report;
+  }
+
+  /**
    * Crea una nuova segnalazione (TENANT/backoffice) con payload unificato.
    */
   async createReportInternal(req: Request, body: any) {
@@ -176,7 +230,7 @@ export class ReportService {
       } catch (e: any) {
         const code = e?.code || e?.meta?.code;
         const target = Array.isArray(e?.meta?.target) ? e.meta.target.join(',') : e?.meta?.target;
-        if (code === 'P2002' && (target?.includes('publicCode') || true)) continue;
+        if (code === 'P2002' && target?.includes('publicCode')) continue;
         throw e;
       }
     }
@@ -227,9 +281,23 @@ export class ReportService {
   /**
    * Elenco segnalazioni per cliente (solo admin/agent)
    */
-  listReports(clientId: string) {
+  listReports(clientId: string, opts?: { page?: number; pageSize?: number; status?: string; departmentId?: string; categoryId?: string; q?: string }) {
+    const page = Math.max(opts?.page || 1, 1);
+    const pageSize = Math.min(Math.max(opts?.pageSize || 20, 1), 100);
+    const skip = (page - 1) * pageSize;
+    const where: any = { clientId };
+    if (opts?.status) {
+      const parts = opts.status.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
+      if (parts.length > 0) where.status = { in: parts as any };
+    }
+    if (opts?.departmentId) where.departmentId = opts.departmentId;
+    if (opts?.categoryId) where.categoryId = opts.categoryId;
+    if (opts?.q) {
+      const q = opts.q.trim();
+      if (q) where.OR = [{ title: { contains: q, mode: 'insensitive' } }, { summary: { contains: q, mode: 'insensitive' } }];
+    }
     return this.prisma.whistleReport.findMany({
-      where: { clientId },
+      where,
       include: {
         messages: {
           select: {
@@ -242,6 +310,8 @@ export class ReportService {
         },
       },
       orderBy: { createdAt: 'desc' },
+      skip,
+      take: pageSize,
     });
   }
 
@@ -304,7 +374,7 @@ export class ReportService {
 
     // Scoping report
     const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { id: true } });
-    if (!report) throw new NotFoundException('Risorsa non trovata');
+    if (!report) throw new NotFoundException('Risorsa interna non trovata');
 
     let filter: any = { reportId, clientId: tenantId };
     if (visibility && visibility.toUpperCase() !== 'ALL') {
@@ -320,11 +390,18 @@ export class ReportService {
   /**
    * PATCH — aggiorna lo stato della segnalazione
    */
-  async updateStatus(reportId: string, dto: CreateReportStatusDto) {
+  async updateStatus(req: any, reportId: string, dto: CreateReportStatusDto) {
     const report = await this.prisma.whistleReport.findUnique({
       where: { id: reportId },
     });
     if (!report) throw new NotFoundException('Segnalazione non trovata');
+
+    const tokenClientId = req?.user?.clientId as string | undefined;
+    if (!tokenClientId || tokenClientId !== report.clientId || tokenClientId !== dto.clientId) {
+      // eslint-disable-next-line no-console
+      console.warn('updateStatus forbidden: tenant mismatch');
+      throw new ForbiddenException('Operazione non consentita');
+    }
 
     const now = new Date();
     const newStatus = dto.status as ReportStatus;
@@ -352,6 +429,9 @@ export class ReportService {
       where: { id: reportId },
       data,
     });
+
+    // eslint-disable-next-line no-console
+    console.info('report status updated', { reportId, status: newStatus });
 
     // Scrivi storico cambi di stato (audit)
     await this.prisma.reportStatusHistory.create({
@@ -418,13 +498,23 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
   /**
    * DELETE — elimina una segnalazione
    */
-  async deleteReport(reportId: string) {
+  async deleteReport(req: any, reportId: string) {
     const report = await this.prisma.whistleReport.findUnique({ where: { id: reportId } });
     if (!report) throw new NotFoundException('Segnalazione non trovata');
+
+    const tokenClientId = req?.user?.clientId as string | undefined;
+    if (!tokenClientId || tokenClientId !== report.clientId) {
+      // eslint-disable-next-line no-console
+      console.warn('deleteReport forbidden: tenant mismatch');
+      throw new ForbiddenException('Operazione non consentita');
+    }
 
     await this.prisma.reportMessage.deleteMany({ where: { reportId } });
     await this.prisma.publicUser.deleteMany({ where: { reportId } });
     await this.prisma.whistleReport.delete({ where: { id: reportId } });
+
+    // eslint-disable-next-line no-console
+    console.info('report deleted', { reportId });
 
     return { message: 'Segnalazione eliminata con successo', id: reportId };
   }
@@ -442,7 +532,7 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
     if (!report) throw new NotFoundException('Segnalazione non trovata');
 
     // Aggiorna stato a NEED_INFO (crea anche messaggio SYSTEM via updateStatus)
-    await this.updateStatus(reportId, {
+    await this.updateStatus(req, reportId, {
       clientId: tenantId,
       reportId,
       status: 'NEED_INFO' as any,

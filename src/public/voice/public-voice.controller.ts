@@ -17,8 +17,8 @@ export class PublicVoiceController {
   @Post('attachments/presign')
   @ApiOperation({ summary: 'Presign per upload audio (stub: 501 se disabilitato)' })
   @Throttle({ default: { limit: 5, ttl: 300 } })
-  presign(@TenantId() tenantId: string) {
-    return this.service.presign(tenantId);
+  presign(@TenantId() tenantId: string, @Body() body?: any) {
+    return this.service.presign(tenantId, body);
   }
 
   @Post('reports')

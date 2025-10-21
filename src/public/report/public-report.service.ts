@@ -116,13 +116,39 @@ export class PublicReportService {
     });
   }
 
-  async presign(tenantId: string) {
+  async presign(tenantId: string, body?: any) {
     if (!tenantId) throw new BadRequestException('Richiesta non valida');
     const presignEnabled = isTrue(process.env.PRESIGN_ENABLED);
     if (!presignEnabled) {
       throw new NotImplementedException('Presign disabilitato');
     }
-    // Placeholder: integrazione storage non presente
+    const mode = (process.env.PRESIGN_MODE || '').toUpperCase();
+    if (mode === 'MOCK') {
+      const maxFileBytes = Math.floor((parseInt(process.env.ATTACH_MAX_FILE_MB || '10', 10)) * 1024 * 1024);
+      const proofSecret = process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
+      const makeItem = (file?: { fileName?: string; mimeType?: string; sizeBytes?: number }) => {
+        const id = (crypto as any).randomUUID ? (crypto as any).randomUUID() : crypto.randomBytes(16).toString('hex');
+        const extFromName = file?.fileName ? (file.fileName.lastIndexOf('.') >= 0 ? file.fileName.substring(file.fileName.lastIndexOf('.')).toLowerCase() : '') : '';
+        const extFromMime = file?.mimeType ? (EXT_FOR_MIME[file.mimeType]?.[0] || '') : '';
+        const ext = extFromName || extFromMime || '';
+        const storageKey = `${tenantId}/tmp/${id}${ext}`;
+        const mime = file?.mimeType || 'application/octet-stream';
+        const proof = hmacSha256Hex(proofSecret, storageKey);
+        return {
+          storageKey,
+          method: 'PUT',
+          uploadUrl: `https://example.invalid/upload/${encodeURIComponent(storageKey)}`,
+          headers: { 'content-type': mime },
+          maxSizeBytes: maxFileBytes,
+          expiresIn: 300,
+          proof,
+        };
+      };
+      // Body opzionale: { files: [{ fileName, mimeType, sizeBytes }] }
+      const items = Array.isArray(body?.files) && body.files.length > 0 ? body.files.map((f: any) => makeItem(f)) : [makeItem()];
+      return { items };
+    }
+    // Integrazione reale non presente
     throw new NotImplementedException('Presign non implementato');
   }
 
@@ -167,6 +193,14 @@ export class PublicReportService {
       }
       if (!a.storageKey || !a.storageKey.startsWith(`${tenantId}/`)) {
         throw new BadRequestException('storageKey non valido');
+      }
+      const requireProof = isTrue(process.env.PRESIGN_PROOF_REQUIRED);
+      if (requireProof) {
+        const proofSecret = process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
+        const expected = hmacSha256Hex(proofSecret, a.storageKey);
+        if (!a.proof || a.proof !== expected) {
+          throw new BadRequestException('proof non valida o mancante');
+        }
       }
       if (a.sizeBytes > maxFileBytes) {
         throw new PayloadTooLargeException('File oltre il limite');
@@ -242,7 +276,7 @@ export class PublicReportService {
       } catch (e: any) {
         const code = e?.code || e?.meta?.code;
         const target = Array.isArray(e?.meta?.target) ? e.meta.target.join(',') : e?.meta?.target;
-        if (code === 'P2002' && (target?.includes('publicCode') || true)) {
+        if (code === 'P2002' && target?.includes('publicCode')) {
           continue;
         }
         throw e;
@@ -348,5 +382,43 @@ export class PublicReportService {
     });
 
     return { messageId: msg.id, createdAt: msg.createdAt, ...(newStatus ? { newStatus } : {}), thread };
+  }
+
+  /**
+   * Stato pubblico (by publicCode + secret). Ritorna info sicure + thread PUBLIC.
+   */
+  async publicStatus(tenantId: string, publicCode: string, secret: string) {
+    if (!tenantId) throw new BadRequestException('Richiesta non valida');
+    if (!publicCode || !secret) throw new BadRequestException('Parametri mancanti');
+    const tokenSha = crypto.createHash('sha256').update(secret).digest('hex');
+    const user = await this.prisma.publicUser.findFirst({
+      where: { clientId: tenantId, token: tokenSha },
+      select: {
+        report: {
+          select: {
+            id: true,
+            publicCode: true,
+            status: true,
+            title: true,
+            summary: true,
+            createdAt: true,
+            updatedAt: true,
+            eventDate: true,
+            privacy: true,
+            channel: true,
+            messages: {
+              where: { visibility: 'PUBLIC' as any },
+              select: { id: true, author: true, body: true, createdAt: true },
+              orderBy: { createdAt: 'asc' },
+            },
+          },
+        },
+      },
+    });
+    const code = (publicCode || '').toUpperCase();
+    if (!user || !user.report || (user.report.publicCode || '').toUpperCase() !== code) {
+      throw new NotFoundException('Token non valido o segnalazione non trovata');
+    }
+    return { message: 'Segnalazione trovata', report: user.report };
   }
 }
