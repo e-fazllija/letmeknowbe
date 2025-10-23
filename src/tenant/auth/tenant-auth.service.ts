@@ -451,7 +451,7 @@ export class TenantAuthService {
       const payload: any = this.jwt.verify(token, { secret: process.env.JWT_REFRESH_SECRET || 'dev_refresh_secret' });
       await this.prisma.refreshSession.update({ where: { id: payload.jti }, data: { revokedAt: new Date() } });
     } catch {
-      // ignore
+      // ignora
     }
   }
 
@@ -488,7 +488,7 @@ export class TenantAuthService {
   }
 }
 
-// helpers to read basic req info when available
+// helpers che leggono basilari req info quando disponibili
 function reqIp(req?: Request): string | undefined {
   if (!req) return undefined;
   return (req.headers['x-forwarded-for'] as string) || req.ip;

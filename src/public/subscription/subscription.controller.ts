@@ -1,11 +1,14 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
-import { ApiParam, ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { ApiParam, ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { SubscriptionService } from './subscription.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
+import { PlatformOptionalGuard } from '../../platform/guards/platform-optional.guard';
 
 @ApiTags('public-subscriptions')
 @Controller('public/subscriptions')
+@UseGuards(PlatformOptionalGuard)
+@ApiBearerAuth('access-token')
 export class SubscriptionController {
   constructor(private readonly service: SubscriptionService) {}
 

@@ -6,11 +6,15 @@ import { PrismaTenantService } from '../prisma-tenant.service';
 import { TenantModule } from '../tenant.module';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ReportSlaScheduler } from './report-sla.scheduler';
+import { ReportTranscriptionScheduler } from './report-transcription.scheduler';
+import { AttachmentScanScheduler } from './attachment-scan.scheduler';
+import { StorageModule } from '../../storage/storage.module';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @Module({
-  imports: [TenantModule, JwtModule.register({})],
+  imports: [TenantModule, JwtModule.register({}), StorageModule],
   controllers: [ReportController],
-  providers: [ReportService, JwtAuthGuard, ReportSlaScheduler],
+  providers: [ReportService, JwtAuthGuard, RolesGuard, ReportSlaScheduler, ReportTranscriptionScheduler, AttachmentScanScheduler],
   exports: [ReportService],
 })
 export class ReportModule {}

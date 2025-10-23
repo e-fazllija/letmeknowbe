@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, NotImplementedException } from '@nestjs/common';
 import { PrismaTenantService } from '../../tenant/prisma-tenant.service';
+import { S3StorageService } from '../../storage/s3-storage.service';
 import { CreatePublicReportDto } from './dto/create-public-report.dto';
 import { Request } from 'express';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PublicReplyDto } from './dto/public-reply.dto';
+import { AttachmentsFinalizeDto } from './dto/attachments-finalize.dto';
 
 const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain']);
 const EXT_FOR_MIME: Record<string, string[]> = {
@@ -47,7 +49,7 @@ function detectPii(text: string): boolean {
 
 @Injectable()
 export class PublicReportService {
-  constructor(private prisma: PrismaTenantService) {}
+  constructor(private prisma: PrismaTenantService, private storage: S3StorageService) {}
 
   private defaults() {
     return [
@@ -148,7 +150,42 @@ export class PublicReportService {
       const items = Array.isArray(body?.files) && body.files.length > 0 ? body.files.map((f: any) => makeItem(f)) : [makeItem()];
       return { items };
     }
-    // Integrazione reale non presente
+    if (mode === 'REAL') {
+      const itemsInput: Array<{ fileName?: string; mimeType?: string; sizeBytes?: number }>
+        = Array.isArray(body?.files) && body.files.length > 0 ? body.files : [{}];
+      const bucket = process.env.S3_BUCKET_TMP || '';
+      const sseMode = ((process.env.S3_SSE_MODE || 'S3').toUpperCase() as any) || 'S3';
+      const kmsKeyId = process.env.S3_KMS_KEY_ID || undefined;
+      const proofSecret = process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
+
+      const results = [] as any[];
+      for (const f of itemsInput) {
+        const id = (crypto as any).randomUUID ? (crypto as any).randomUUID() : crypto.randomBytes(16).toString('hex');
+        const extFromName = f?.fileName ? (f.fileName.lastIndexOf('.') >= 0 ? f.fileName.substring(f.fileName.lastIndexOf('.')).toLowerCase() : '') : '';
+        const extFromMime = f?.mimeType ? (EXT_FOR_MIME[f.mimeType]?.[0] || '') : '';
+        const ext = extFromName || extFromMime || '';
+        const storageKey = `${tenantId}/tmp/${id}${ext}`;
+        const presigned = await this.storage.presignPut({
+          bucket,
+          key: storageKey,
+          contentType: f?.mimeType || 'application/octet-stream',
+          expiresInSeconds: 300,
+          sseMode,
+          kmsKeyId,
+        });
+        const proof = hmacSha256Hex(proofSecret, storageKey);
+        results.push({
+          storageKey,
+          method: 'PUT',
+          uploadUrl: presigned.uploadUrl,
+          headers: presigned.headers,
+          maxSizeBytes: toBytes(parseInt(process.env.ATTACH_MAX_FILE_MB || '10', 10)),
+          expiresIn: presigned.expiresIn,
+          proof,
+        });
+      }
+      return { items: results };
+    }
     throw new NotImplementedException('Presign non implementato');
   }
 
@@ -269,6 +306,20 @@ export class PublicReportService {
               })),
             });
           }
+          // Public receipt at creation (optional)
+          if (isTrue(process.env.PUBLIC_AUTO_ACK)) {
+            const body = 'Ricevuta: la tua segnalazione è stata registrata. Riceverai aggiornamenti entro i tempi previsti.';
+            await tx.reportMessage.create({
+              data: {
+                clientId: tenantId,
+                reportId: report.id,
+                author: 'AGENTE',
+                body,
+                note: 'PUBLIC_RECEIPT',
+                visibility: 'PUBLIC' as any,
+              },
+            });
+          }
           return report;
         });
         report = result;
@@ -285,6 +336,47 @@ export class PublicReportService {
     if (!report) throw new BadRequestException('Impossibile creare la segnalazione, riprovare');
 
     return { reportId: report.id, publicCode: publicCode.toUpperCase(), secret: secretRaw, createdAt: report.createdAt };
+  }
+
+  /**
+   * Finalize upload allegati in TMP: valida HMAC, ETag e size. Non sposta i file.
+   * Integrazione ClamAV/promozione verrà gestita dallo scheduler nella milestone successiva.
+   */
+  async finalize(tenantId: string, dto: AttachmentsFinalizeDto) {
+    if (!tenantId) throw new BadRequestException('Richiesta non valida');
+    const items = Array.isArray(dto?.items) ? dto.items : [];
+    if (items.length === 0) throw new BadRequestException('Nessun elemento da finalizzare');
+
+    const bucketTmp = process.env.S3_BUCKET_TMP || '';
+    const finalizeSecret = process.env.UPLOAD_FINALIZE_SECRET || process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
+
+    const accepted: any[] = [];
+    const rejected: any[] = [];
+
+    for (const it of items) {
+      try {
+        if (!it.storageKey || !it.storageKey.startsWith(`${tenantId}/tmp/`)) throw new BadRequestException('storageKey non valido');
+        // HMAC opzionale ma consigliato
+        if (it.hmac) {
+          const expected = hmacSha256Hex(finalizeSecret, it.storageKey);
+          if (expected !== it.hmac) throw new BadRequestException('HMAC non valido');
+        }
+        // HEAD su S3/MinIO per coerenza etag/size (best-effort)
+        const head = await this.storage.headObject(bucketTmp, it.storageKey);
+        if (!head) throw new NotFoundException('Oggetto non trovato');
+        if (typeof it.sizeBytes === 'number' && head.contentLength != null && head.contentLength !== it.sizeBytes) {
+          throw new BadRequestException('Dimensione non coerente');
+        }
+        if (it.etag && head.etag && head.etag.replace(/\"/g, '') !== it.etag.replace(/\"/g, '')) {
+          throw new BadRequestException('ETag non coerente');
+        }
+        accepted.push({ storageKey: it.storageKey, etag: head.etag, sizeBytes: head.contentLength ?? it.sizeBytes });
+      } catch (e: any) {
+        rejected.push({ storageKey: it.storageKey, reason: e?.message || 'invalid' });
+      }
+    }
+
+    return { accepted, rejected };
   }
 
   /**

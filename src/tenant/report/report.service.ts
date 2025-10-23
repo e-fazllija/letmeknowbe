@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, ForbiddenException, NotImplementedException } from '@nestjs/common';
 import { PrismaTenantService } from '../prisma-tenant.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { CreateReportMessageDto } from './dto/create-report-message.dto';
@@ -78,6 +78,15 @@ export class ReportService {
       });
     }
 
+    // Access log (VIEW)
+    try {
+      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || (req.socket?.remoteAddress || '');
+      const ua = (req.headers['user-agent'] as string) || undefined;
+      const userId = req?.user?.sub as string | undefined;
+      if (userId) {
+        await (this.prisma as any).reportAccessLog.create({ data: { reportId, userId, clientId: tenantId, action: 'VIEW', ip: ip || undefined, ua } });
+      }
+    } catch {}
     return report;
   }
 
@@ -581,6 +590,83 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
     });
 
     return { message: 'Trascrizione aggiunta', item: msg };
+  }
+
+  // ACCESS LOGS (ADMIN/AUDITOR)
+  async getAccessLogs(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { id: true } });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+    return (this.prisma as any).reportAccessLog.findMany({ where: { reportId }, orderBy: { createdAt: 'desc' } });
+  }
+
+  // EXPORT PDF (MOCK/PDFKIT)
+  async exportPdf(req: any, reportId: string): Promise<{ buffer: Buffer; filename: string }> {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+    const report = await this.prisma.whistleReport.findFirst({
+      where: { id: reportId, clientId: tenantId },
+      select: {
+        id: true,
+        publicCode: true,
+        status: true,
+        title: true,
+        summary: true,
+        createdAt: true,
+        updatedAt: true,
+        eventDate: true,
+        privacy: true,
+        channel: true,
+        messages: { select: { id: true, author: true, body: true, createdAt: true, visibility: true }, orderBy: { createdAt: 'asc' } },
+      },
+    });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+
+    const engine = (process.env.PDF_ENGINE || 'MOCK').toUpperCase();
+    let buffer: Buffer;
+    if (engine === 'PDFKIT') {
+      try {
+        const modName = 'pdfkit';
+        // Use dynamic specifier to avoid TS static resolution when module is not installed
+        const PDFDocument = (await import(modName as any)).default as any;
+        const doc = new PDFDocument({ size: 'A4', margin: 48 });
+        const chunks: Buffer[] = [];
+        doc.on('data', (d: Buffer) => chunks.push(d));
+        const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
+        doc.fontSize(16).text('LetMeKnow - Export Segnalazione', { align: 'center' });
+        doc.moveDown();
+        doc.fontSize(12).text(`Codice: ${report.publicCode}`);
+        doc.text(`Stato: ${report.status}`);
+        doc.text(`Titolo: ${report.title}`);
+        if (report.summary) doc.text(`Descrizione: ${report.summary}`);
+        doc.text(`Creato: ${report.createdAt.toISOString()}`);
+        doc.moveDown();
+        doc.text('Messaggi:', { underline: true });
+        for (const m of report.messages) {
+          doc.moveDown(0.5).fontSize(10).text(`[${m.createdAt.toISOString()}] ${m.author} (${m.visibility}): ${m.body}`);
+        }
+        doc.end();
+        buffer = await done;
+      } catch (e) {
+        throw new NotImplementedException('PDF engine non disponibile (installa pdfkit o usa MOCK)');
+      }
+    } else {
+      // MOCK: semplice PDF minimale usando testo base
+      const content = `Report ${report.publicCode}\nStato: ${report.status}\nTitolo: ${report.title}`;
+      buffer = Buffer.from(`PDF MOCK\n${content}`, 'utf8');
+    }
+
+    // Access log (EXPORT)
+    try {
+      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || (req.socket?.remoteAddress || '');
+      const ua = (req.headers['user-agent'] as string) || undefined;
+      await (this.prisma as any).reportAccessLog.create({ data: { reportId, userId, clientId: tenantId, action: 'EXPORT', ip: ip || undefined, ua } });
+    } catch {}
+
+    const filename = `report_${report.publicCode || report.id}.pdf`;
+    return { buffer, filename };
   }
 }
 

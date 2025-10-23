@@ -38,4 +38,32 @@ export const validationSchema = Joi.object({
   PLATFORM_JWT_ISS: Joi.string().optional(),
   PLATFORM_JWT_AUD: Joi.string().default('platform'),
   PLATFORM_IP_ALLOWLIST: Joi.string().optional(),
+  PLATFORM_PROTECT_PUBLIC_ADMIN: Joi.boolean().truthy('true', '1').falsy('false', '0').default(false),
+
+  // Storage (S3/MinIO)
+  STORAGE_PROVIDER: Joi.string().valid('S3').allow('', null),
+  S3_ENDPOINT: Joi.string().uri().allow('', null),
+  S3_REGION: Joi.string().default('us-east-1'),
+  S3_ACCESS_KEY: Joi.string().allow('', null),
+  S3_SECRET_KEY: Joi.string().allow('', null),
+  S3_BUCKET_TMP: Joi.string().allow('', null),
+  S3_BUCKET_ATTACH: Joi.string().allow('', null),
+  S3_SSE_MODE: Joi.string().valid('NONE', 'S3', 'KMS').default('S3'),
+  S3_KMS_KEY_ID: Joi.string().allow('', null),
+  UPLOAD_FINALIZE_SECRET: Joi.string().allow('', null),
+
+  // Antivirus / Scansione allegati
+  ATTACH_SCAN_ENABLED: Joi.boolean().truthy('true', '1').falsy('false', '0').default(false),
+  ATTACH_SCAN_TIMER_MS: Joi.string().allow('', null),
+  CLAMAV_HOST: Joi.string().allow('', null),
+  CLAMAV_PORT: Joi.number().integer().min(1).max(65535).default(3310),
+  DELETE_INFECTED: Joi.boolean().truthy('true', '1').falsy('false', '0').default(false),
+
+  // Public auto-ack (ricevuta al segnalante)
+  PUBLIC_AUTO_ACK: Joi.boolean().truthy('true', '1').falsy('false', '0').default(true),
+  PUBLIC_ACK_TTL_DAYS: Joi.number().integer().min(1).default(7),
+
+  // Export PDF
+  EXPORT_PDF_ENABLED: Joi.boolean().truthy('true', '1').falsy('false', '0').default(true),
+  PDF_ENGINE: Joi.string().valid('MOCK', 'PDFKIT').default('MOCK'),
 });

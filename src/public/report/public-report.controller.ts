@@ -7,6 +7,7 @@ import { CreatePublicReportDto } from './dto/create-public-report.dto';
 import { Request } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { PublicReplyDto } from './dto/public-reply.dto';
+import { AttachmentsFinalizeDto } from './dto/attachments-finalize.dto';
 
 @ApiTags('Public - Reports')
 @ApiSecurity('tenant-key')
@@ -56,6 +57,13 @@ export class PublicReportController {
   @Throttle({ default: { limit: 5, ttl: 300 } })
   presign(@TenantId() tenantId: string, @Body() body?: any) {
     return this.service.presign(tenantId, body);
+  }
+
+  @Post('reports/attachments/finalize')
+  @ApiOperation({ summary: 'Finalize upload allegati (S3/MinIO): valida HMAC/ETag/size e registra in quarantena' })
+  @Throttle({ default: { limit: 10, ttl: 300 } })
+  finalize(@TenantId() tenantId: string, @Body() dto: AttachmentsFinalizeDto) {
+    return this.service.finalize(tenantId, dto);
   }
 
   @Get('reports/status')

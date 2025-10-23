@@ -6,6 +6,7 @@ import { json, urlencoded } from 'express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import * as crypto from 'crypto';
+import { sanitizeUrl } from './common/logging/sanitize-url';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -20,7 +21,9 @@ async function bootstrap() {
       const enabled = (process.env.HTTP_LOG_ENABLED || '').toLowerCase() === 'true' || process.env.HTTP_LOG_ENABLED === '1';
       if (enabled) {
         // eslint-disable-next-line no-console
-        console.info('http', { rid, method: req.method, url: req.originalUrl || req.url, status: res.statusCode, ms: Date.now() - start });
+        const urlRaw = (req.originalUrl || req.url || '') as string;
+        const urlSafe = sanitizeUrl(urlRaw);
+        console.info('http', { rid, method: req.method, url: urlSafe, status: res.statusCode, ms: Date.now() - start });
       }
     });
     next();
@@ -120,9 +123,10 @@ async function bootstrap() {
     },
   });
 
-  const port = 3000;
+  const port = parseInt(process.env.PORT || '3000', 10);
   await app.listen(port);
-  console.log(`API up on http://localhost:${port}/v1`);
-  console.log(`Swagger on http://localhost:${port}/api`);
+  const host = process.env.HOST || 'localhost';
+  console.log(`API up on http://${host}:${port}/v1`);
+  console.log(`Swagger on http://${host}:${port}/api`);
 }
 bootstrap();

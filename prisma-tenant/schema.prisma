@@ -85,6 +85,7 @@ enum UserStatus {
 enum UserRole {
   ADMIN
   AGENT
+  AUDITOR
 }
 
 enum UserTokenType {
@@ -243,6 +244,7 @@ model WhistleReport {
   messages    ReportMessage[]
   statusLogs  ReportStatusHistory[]
   attachments ReportAttachment[]
+  accessLogs  ReportAccessLog[]
 
   @@index([clientId])
   @@index([status])
@@ -313,6 +315,13 @@ model ReportAttachment {
 
   report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
+  // Stato pipeline allegati
+  status     AttachmentStatus @default(UPLOADED)
+  etag       String?
+  finalKey   String?
+  scannedAt  DateTime?
+  virusName  String?
+
   @@index([reportId])
 }
 
@@ -368,4 +377,30 @@ model UserRecoveryCode {
   user InternalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, usedAt])
+}
+
+// --- NEW: Access log per audit (view/export)
+model ReportAccessLog {
+  id        String   @id @default(cuid())
+  reportId  String
+  userId    String
+  clientId  String
+  action    String   // VIEW | EXPORT | LIST | OTHER
+  ip        String?
+  ua        String?
+  createdAt DateTime @default(now())
+
+  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, createdAt])
+  @@index([userId, createdAt])
+  @@index([clientId, createdAt])
+}
+
+// Stato allegati durante pipeline di scan/promozione
+enum AttachmentStatus {
+  UPLOADED
+  SCANNING
+  CLEAN
+  INFECTED
 }

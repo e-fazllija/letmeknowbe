@@ -46,6 +46,7 @@ export class ReportSlaScheduler implements OnModuleInit, OnModuleDestroy {
 
   private async run() {
     const now = new Date();
+    await this.ensurePublicReceipt(now);
     await this.remindAck(now);
     await this.remindResponse(now);
   }
@@ -130,5 +131,33 @@ export class ReportSlaScheduler implements OnModuleInit, OnModuleDestroy {
       }
     }
   }
-}
 
+  // Garantisce una ricevuta PUBLIC entro X giorni se assente
+  private async ensurePublicReceipt(now: Date) {
+    const ttlDays = parseInt(process.env.PUBLIC_ACK_TTL_DAYS || process.env.ACK_TTL_DAYS || '7', 10) || 7;
+    const cutoff = addDays(now, -ttlDays);
+    const candidates = await this.prisma.whistleReport.findMany({
+      where: {
+        createdAt: { lte: cutoff },
+        status: { in: ['OPEN', 'IN_PROGRESS', 'NEED_INFO', 'SUSPENDED'] as any },
+      },
+      select: { id: true, clientId: true },
+    });
+    for (const r of candidates) {
+      const exists = await this.prisma.reportMessage.findFirst({
+        where: { reportId: r.id, visibility: 'PUBLIC' as any, note: 'PUBLIC_RECEIPT' },
+      });
+      if (exists) continue;
+      await this.prisma.reportMessage.create({
+        data: {
+          clientId: r.clientId,
+          reportId: r.id,
+          author: 'AGENTE',
+          body: 'Ricevuta: abbiamo preso in carico la tua segnalazione.',
+          note: 'PUBLIC_RECEIPT',
+          visibility: 'PUBLIC' as any,
+        },
+      });
+    }
+  }
+}

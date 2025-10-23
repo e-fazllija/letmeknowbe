@@ -12,6 +12,7 @@ import { PublicAuthModule } from './public/auth/public-auth.module';
 import { PlatformModule } from './platform/platform.module';
 import { PublicReportModule } from './public/report/public-report.module';
 import { PublicVoiceModule } from './public/voice/public-voice.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { PublicVoiceModule } from './public/voice/public-voice.module';
     TenantAuthModule,
     UserModule,
     ReportModule,
+    HealthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

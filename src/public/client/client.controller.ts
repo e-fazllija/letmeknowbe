@@ -1,12 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ClientService } from './client.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { SignupClientDto } from './dto/signup-client.dto';
+import { PlatformOptionalGuard } from '../../platform/guards/platform-optional.guard';
 
 @ApiTags('public-clients')
 @Controller('public/clients')
+@UseGuards(PlatformOptionalGuard)
+@ApiBearerAuth('access-token')
 export class ClientController {
   constructor(private readonly service: ClientService) {}
 

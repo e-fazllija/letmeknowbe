@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
 import { ClientService } from './client.service';
 import { ClientController } from './client.controller';
 
@@ -8,10 +9,12 @@ import { PrismaTenantService } from './../../tenant/prisma-tenant.service';
 
 // Modulo Tenant (importante per poter iniettare PrismaTenantService)
 import { TenantModule } from './../../tenant/tenant.module';
+import { PlatformOptionalGuard } from '../../platform/guards/platform-optional.guard';
 
 @Module({
   imports: [
-    TenantModule, 
+    TenantModule,
+    JwtModule.register({}),
   ],
   controllers: [
     ClientController, // Le route /v1/public/clients
@@ -19,6 +22,7 @@ import { TenantModule } from './../../tenant/tenant.module';
   providers: [
     ClientService,          // Il service principale
     PrismaPublicService,    // DB pubblico (Intent)
+    PlatformOptionalGuard,
     // PrismaTenantService is provided by TenantModule
   ],
   exports: [

@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException, NotImplementedException, PayloadTooLargeException } from '@nestjs/common';
 import { PrismaTenantService } from '../../tenant/prisma-tenant.service';
+import { S3StorageService } from '../../storage/s3-storage.service';
 import { CreateVoiceReportDto } from './dto/create-voice-report.dto';
 import { Request } from 'express';
 import * as bcrypt from 'bcryptjs';
@@ -32,7 +33,7 @@ function detectPii(text: string) {
 
 @Injectable()
 export class PublicVoiceService {
-  constructor(private prisma: PrismaTenantService) {}
+  constructor(private prisma: PrismaTenantService, private storage: S3StorageService) {}
 
   async presign(tenantId: string, body?: any) {
     const presignEnabled = isTrue(process.env.PRESIGN_ENABLED);
@@ -66,7 +67,41 @@ export class PublicVoiceService {
       const items = Array.isArray(body?.files) && body.files.length > 0 ? body.files.map((f: any) => makeItem(f)) : [makeItem()];
       return { items };
     }
-    // Placeholder: integrazione storage non presente
+    if (mode === 'REAL') {
+      const itemsInput: Array<{ fileName?: string; mimeType?: string; sizeBytes?: number }> = Array.isArray(body?.files) && body.files.length > 0 ? body.files : [{}];
+      const bucket = process.env.S3_BUCKET_TMP || '';
+      const sseMode = ((process.env.S3_SSE_MODE || 'S3').toUpperCase() as any) || 'S3';
+      const kmsKeyId = process.env.S3_KMS_KEY_ID || undefined;
+      const proofSecret = process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
+
+      const results = [] as any[];
+      for (const f of itemsInput) {
+        const id = (crypto as any).randomUUID ? (crypto as any).randomUUID() : crypto.randomBytes(16).toString('hex');
+        const extFromName = f?.fileName ? getExt(f.fileName) : '';
+        const extFromMime = f?.mimeType ? (EXT_FOR_MIME[f.mimeType]?.[0] || '') : '';
+        const ext = extFromName || extFromMime || '';
+        const storageKey = `${tenantId}/tmp/${id}${ext}`;
+        const presigned = await this.storage.presignPut({
+          bucket,
+          key: storageKey,
+          contentType: f?.mimeType || 'application/octet-stream',
+          expiresInSeconds: 300,
+          sseMode,
+          kmsKeyId,
+        });
+        const proof = hmacSha256Hex(proofSecret, storageKey);
+        results.push({
+          storageKey,
+          method: 'PUT',
+          uploadUrl: presigned.uploadUrl,
+          headers: presigned.headers,
+          maxSizeBytes: toBytes(parseInt(process.env.ATTACH_MAX_FILE_MB || '10', 10)),
+          expiresIn: presigned.expiresIn,
+          proof,
+        });
+      }
+      return { items: results };
+    }
     throw new NotImplementedException('Presign non implementato');
   }
 
@@ -165,6 +200,19 @@ export class PublicVoiceService {
               storageKey: a.storageKey,
             })),
           });
+          if (isTrue(process.env.PUBLIC_AUTO_ACK)) {
+            const body = 'Ricevuta: la tua segnalazione è stata registrata. Riceverai aggiornamenti entro i tempi previsti.';
+            await tx.reportMessage.create({
+              data: {
+                clientId: tenantId,
+                reportId: report.id,
+                author: 'AGENTE',
+                body,
+                note: 'PUBLIC_RECEIPT',
+                visibility: 'PUBLIC' as any,
+              },
+            });
+          }
           return report;
         });
         break;
@@ -176,6 +224,24 @@ export class PublicVoiceService {
       }
     }
     if (!report) throw new BadRequestException('Impossibile creare la segnalazione, riprovare');
+
+    // Enqueue soft transcription job (marker) if enabled
+    if (isTrue(process.env.TRANSCRIBE_ENABLED)) {
+      try {
+        await this.prisma.reportMessage.create({
+          data: {
+            clientId: tenantId,
+            reportId: report.id,
+            author: 'system',
+            body: 'Trascrizione in coda (soft enqueue).',
+            note: 'TRANSCRIPT_JOB_QUEUED',
+            visibility: 'SYSTEM' as any,
+          },
+        });
+      } catch {
+        // ignore enqueue failure (non-bloccante)
+      }
+    }
 
     return { reportId: report.id, publicCode: publicCode.toUpperCase(), secret: secretRaw, createdAt: report.createdAt };
   }

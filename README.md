@@ -118,6 +118,19 @@ Attachments: proof HMAC (facoltativo)
 Tenant reports: paginazione e filtri
 - `GET /v1/tenant/reports?clientId=<TENANT>&page=1&pageSize=20&status=OPEN,NEED_INFO&departmentId=...&categoryId=...&q=ricerca`
 
+## Trascrizione (STT) – Setup
+- Abilita pipeline asincrona con env:
+  - `TRANSCRIBE_ENABLED=true`
+  - `TRANSCRIBE_ENGINE=MOCK|WHISPER_LOCAL`
+  - `TRANSCRIBE_TIMER_MS=300000` (facoltativo, default 5 minuti)
+  - `WHISPER_URL=http://whisper:8080/transcribe` (quando il microservizio è pronto)
+  - `WHISPER_MODEL=small-int8|small|medium`, `WHISPER_DEVICE=cpu|cuda`, `WHISPER_LANG=it`, `TRANSCRIBE_MAX_DURATION_S=600`
+- Flusso:
+  - Creazione voice report → marker SYSTEM `TRANSCRIPT_JOB_QUEUED`
+  - Scheduler `report-transcription.scheduler.ts` cerca report con allegati audio e senza `TRANSCRIPT_DONE/ERROR`
+  - ENGINE=MOCK → scrive messaggio `INTERNAL` (nota `Trascrizione audio`) con testo fittizio e marca `TRANSCRIPT_DONE`
+  - ENGINE=WHISPER_LOCAL → pronto a chiamare `WHISPER_URL` (integrazione reale storage/HTTP da collegare)
+
 Codici di stato
 - 200/201: OK
 - 400: validazione (es. allegati presenti con presign disabilitato)

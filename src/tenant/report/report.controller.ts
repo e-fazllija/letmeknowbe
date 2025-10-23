@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards, ForbiddenException } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, Req, Res, UseGuards, ForbiddenException } from '@nestjs/common';
 import { ReportService } from './report.service';
 // import { CreateReportDto } from './dto/create-report.dto';
 // import { CreateReportMessageDto } from './dto/create-report-message.dto';
@@ -6,10 +6,13 @@ import { CreateReportStatusDto } from './dto/create-report-status.dto';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Request } from 'express';
+import { Response } from 'express';
 import { CreateTenantReportDto } from './dto/create-tenant-report.dto';
 import { CreateTenantMessageDto, TenantMessageVisibility } from './dto/create-tenant-message.dto';
 import { RequestInfoDto } from './dto/request-info.dto';
 import { VoiceTranscriptDto } from './dto/voice-transcript.dto';
+import { Roles } from '../../common/guards/roles.decorator';
+import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('Tenant - Segnalazioni')
 @Controller('tenant/reports')
@@ -18,7 +21,8 @@ export class ReportController {
 
   // CREA NUOVA SEGNALAZIONE (TENANT, BACKOFFICE)
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Crea una segnalazione (backoffice) con payload unificato' })
   @ApiBody({ type: CreateTenantReportDto, description: 'Supporto legacy: tipoSegnalazione/ufficio/segnalazione verranno mappati internamente (deprecato).', required: true })
@@ -36,7 +40,8 @@ export class ReportController {
 
   // DETTAGLIO SEGNALAZIONE (TENANT) CON AUTO-ACK ALLA PRIMA LETTURA
   @Get(':reportId')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT', 'AUDITOR')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Dettaglio segnalazione (auto-ack alla prima lettura)' })
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
@@ -54,7 +59,8 @@ export class ReportController {
   @ApiQuery({ name: 'departmentId', required: false })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'q', required: false, description: 'Ricerca testuale su title/summary' })
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT', 'AUDITOR')
   @ApiBearerAuth('access-token')
   listReports(
     @Req() req: Request,
@@ -88,7 +94,8 @@ export class ReportController {
 
   // AGGIUNGE UNA NOTA (INTERNAL) O UN MESSAGGIO (PUBLIC) AL REPORT
   @Post('message')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Aggiunge una nota interna (INTERNAL) o un messaggio pubblico (PUBLIC) al report' })
   @ApiBody({
@@ -110,7 +117,8 @@ export class ReportController {
 
   // ELENCO MESSAGGI DI UNA SEGNALAZIONE
   @Get(':reportId/messages')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Elenco messaggi di una segnalazione (tenant)' })
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
@@ -139,7 +147,8 @@ export class ReportController {
 
 // PATCH — aggiorna la nota interna di un messaggio
 @Patch(':reportId/message/:messageId/note')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN', 'AGENT')
 @ApiBearerAuth('access-token')
 @ApiOperation({
   summary: 'Aggiorna la nota di un messaggio (solo INTERNAL)',
@@ -167,7 +176,8 @@ updateMessageNote(
 
 // PATCH — aggiorna il contenuto (body) del messaggio
 @Patch(':reportId/message/:messageId/body')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles('ADMIN', 'AGENT')
 @ApiBearerAuth('access-token')
 @ApiOperation({
   summary: 'Aggiorna il contenuto (body) di un messaggio (solo INTERNAL)',
@@ -195,7 +205,8 @@ updateMessageBody(
 
   // DELETE — ELIMINA UNA SEGNALAZIONE COMPLETA
   @Delete(':reportId')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Elimina una segnalazione',
@@ -207,7 +218,8 @@ updateMessageBody(
 
   // AZIONE RAPIDA: Richiesta chiarimenti (set NEED_INFO + messaggio pubblico)
   @Post(':reportId/request-info')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Richiedi chiarimenti al segnalante',
@@ -229,13 +241,37 @@ updateMessageBody(
 
   // TENANT: carica trascrizione manuale (nota INTERNAL)
   @Post(':reportId/voice/transcript')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Aggiunge una trascrizione audio (INTERNAL)', description: 'Crea un messaggio INTERNAL con il testo della trascrizione' })
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
   @ApiBody({ type: VoiceTranscriptDto })
   addTranscript(@Req() req: Request, @Param('reportId') reportId: string, @Body() dto: VoiceTranscriptDto) {
     return this.service.addVoiceTranscript(req, reportId, dto);
+  }
+
+  // LOGS DI ACCESSO (ADMIN/AUDITOR)
+  @Get(':reportId/logs')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AUDITOR')
+  @ApiOperation({ summary: 'Access log del report (view/export)' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  getLogs(@Req() req: Request, @Param('reportId') reportId: string) {
+    return this.service.getAccessLogs(req, reportId);
+  }
+
+  // EXPORT PDF (ADMIN/AUDITOR)
+  @Get(':reportId/export')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AUDITOR')
+  @ApiOperation({ summary: 'Esporta il report in PDF (engine MOCK/PDFKIT)' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  @Header('Content-Type', 'application/pdf')
+  async export(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Param('reportId') reportId: string) {
+    const { buffer, filename } = await this.service.exportPdf(req, reportId);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return buffer;
   }
 }
 
