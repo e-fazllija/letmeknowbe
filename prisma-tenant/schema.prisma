@@ -406,3 +406,60 @@ enum AttachmentStatus {
   CLEAN
   INFECTED
 }
+
+// Case policy per-tenant (impostazioni)
+model CasePolicy {
+  clientId           String   @id
+  restrictVisibility Boolean  @default(false)
+  allowMentions      Boolean  @default(true)
+  redactPii          Boolean  @default(false)
+  allowAttachments   Boolean  @default(true)
+  updatedAt          DateTime @updatedAt
+}
+
+// Templates per questionari interni
+model Template {
+  id        String   @id @default(cuid())
+  clientId  String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  questions TemplateQuestion[]
+
+  @@unique([clientId, name])
+  @@index([clientId])
+}
+
+model TemplateQuestion {
+  id         String   @id @default(cuid())
+  templateId String
+  label      String
+  order      Int      @default(0)
+
+  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+}
+
+// Billing profilo minimo in tenant (opzionale)
+model BillingProfile {
+  clientId     String   @id
+  companyName  String
+  taxId        String
+  address      String
+  zip          String
+  city         String
+  province     String
+  country      String
+  billingEmail String
+  updatedAt    DateTime @updatedAt
+}
+
+// Payment method minimo in tenant (mascherato)
+model PaymentMethod {
+  clientId  String   @id
+  type      String
+  masked    String
+  updatedAt DateTime @updatedAt
+}
