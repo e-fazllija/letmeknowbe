@@ -110,25 +110,25 @@ model Department {
 
   categories Category[]
 
-  @@index([clientId, active, sortOrder])
   @@unique([clientId, name])
+  @@index([clientId, active, sortOrder])
 }
 
 // Lookup per-tenant: Categorie (per reparto)
 model Category {
-  id           String     @id @default(cuid())
+  id           String   @id @default(cuid())
   clientId     String
   departmentId String
   name         String
-  active       Boolean    @default(true)
-  sortOrder    Int        @default(0)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  active       Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   department Department @relation(fields: [departmentId], references: [id])
 
-  @@index([clientId, departmentId, active, sortOrder])
   @@unique([clientId, departmentId, name])
+  @@index([clientId, departmentId, active, sortOrder])
 }
 
 // Azienda cliente (tenant)
@@ -230,14 +230,14 @@ model WhistleReport {
   finalClosedAt DateTime?
 
   // Campi public form
-  eventDate   DateTime     @default(now())
-  privacy     ReporterPrivacy @default(ANONIMO)
-  departmentId String?
-  categoryId   String?
-  containsPIISuspected Boolean @default(false)
-  ipHash      String?     @db.VarChar(128)
-  ua          String?
-  retentionAt DateTime?
+  eventDate            DateTime        @default(now())
+  privacy              ReporterPrivacy @default(ANONIMO)
+  departmentId         String?
+  categoryId           String?
+  containsPIISuspected Boolean         @default(false)
+  ipHash               String?         @db.VarChar(128)
+  ua                   String?
+  retentionAt          DateTime?
 
   internalUserId String?
   internalUser   InternalUser? @relation("UserReports", fields: [internalUserId], references: [id])
@@ -318,11 +318,11 @@ model ReportAttachment {
   report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
 
   // Stato pipeline allegati
-  status     AttachmentStatus @default(UPLOADED)
-  etag       String?
-  finalKey   String?
-  scannedAt  DateTime?
-  virusName  String?
+  status    AttachmentStatus @default(UPLOADED)
+  etag      String?
+  finalKey  String?
+  scannedAt DateTime?
+  virusName String?
 
   @@index([reportId])
 }
@@ -387,7 +387,7 @@ model ReportAccessLog {
   reportId  String
   userId    String
   clientId  String
-  action    String   // VIEW | EXPORT | LIST | OTHER
+  action    String // VIEW | EXPORT | LIST | OTHER
   ip        String?
   ua        String?
   createdAt DateTime @default(now())
