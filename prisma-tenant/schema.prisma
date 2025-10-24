@@ -111,6 +111,7 @@ model Department {
   categories Category[]
 
   @@index([clientId, active, sortOrder])
+  @@unique([clientId, name])
 }
 
 // Lookup per-tenant: Categorie (per reparto)
@@ -156,6 +157,7 @@ model Subscription {
   createdAt     DateTime           @default(now())
 
   @@index([clientId])
+  @@unique([clientId, departmentId, name])
 }
 
 // Utenti interni (admin, agent)
