@@ -65,16 +65,29 @@ export class StatsService {
     });
     const byDepartment = (byDepartmentRaw || []).map((x: any) => ({ name: x.departmentId, value: x._count._all }));
 
+    // status over time (by month)
+    const statusRows = await this.prisma.$queryRawUnsafe<{ date: string; status: string; count: number }[]>(
+      `select to_char(date_trunc('month', "createdAt"), 'YYYY-MM') as date, "status" as status, count(*)::int as count from "WhistleReport" where "clientId" = $1 group by 1,2 order by 1`,
+      clientId,
+    );
+    const statusMap: Record<string, any> = {};
+    for (const r of statusRows) {
+      const row = (statusMap[r.date] = statusMap[r.date] || { date: r.date, OPEN: 0, IN_PROGRESS: 0, CLOSED: 0 });
+      if (r.status === 'OPEN' || r.status === 'IN_PROGRESS' || r.status === 'CLOSED') {
+        (row as any)[r.status] = r.count;
+      }
+    }
+    const statusOverTime = Object.values(statusMap).sort((a: any, b: any) => (a.date < b.date ? -1 : 1));
+
     const data = {
       kpis: { reports, avgDaysToReceive, avgDaysToClose, open },
       byMonth,
       bySource,
       byDepartment,
-      statusOverTime: [],
+      statusOverTime,
     };
 
     this.cache.set(clientId, { data, expiresAt: now + this.ttlMs() });
     return data;
   }
 }
-
