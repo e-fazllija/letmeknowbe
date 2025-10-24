@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { ConfigModule } from '@nestjs/config';
 import { validationSchema } from './config/config.validation';
@@ -13,6 +13,10 @@ import { PlatformModule } from './platform/platform.module';
 import { PublicReportModule } from './public/report/public-report.module';
 import { PublicVoiceModule } from './public/voice/public-voice.module';
 import { HealthModule } from './health/health.module';
+import { DepartmentModule } from './tenant/department/department.module';
+import { CategoryModule } from './tenant/category/category.module';
+import { StatsModule } from './tenant/stats/stats.module';
+import { RateLimitFilter } from './common/filters/rate-limit.filter';
 
 @Module({
   imports: [
@@ -33,7 +37,13 @@ import { HealthModule } from './health/health.module';
     UserModule,
     ReportModule,
     HealthModule,
+    DepartmentModule,
+    CategoryModule,
+    StatsModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_FILTER, useClass: RateLimitFilter },
+  ],
 })
 export class AppModule {}
