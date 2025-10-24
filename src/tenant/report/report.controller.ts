@@ -15,6 +15,7 @@ import { Roles } from '../../common/guards/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 
 @ApiTags('Tenant - Segnalazioni')
+@ApiBearerAuth('access-token')
 @Controller('tenant/reports')
 export class ReportController {
   constructor(private readonly service: ReportService) {}

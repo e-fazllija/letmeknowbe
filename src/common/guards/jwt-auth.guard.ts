@@ -8,7 +8,14 @@ export class JwtAuthGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean | Promise<boolean> {
     const req = context.switchToHttp().getRequest();
     const auth = (req.headers['authorization'] as string) || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+    let token: string | null = null;
+
+    if (auth && auth.startsWith('Bearer ')) {
+      token = auth.slice(7);
+    } else if (req.cookies && typeof req.cookies['access_token'] === 'string') {
+      token = req.cookies['access_token'] as string;
+    }
+
     if (!token) throw new UnauthorizedException('Missing access token');
 
     try {
@@ -22,4 +29,3 @@ export class JwtAuthGuard implements CanActivate {
     }
   }
 }
-

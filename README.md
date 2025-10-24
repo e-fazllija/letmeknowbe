@@ -172,12 +172,12 @@ MFA durante il login
 - Dopo il login (201 con `mfaToken`): `POST /v1/tenant/auth/mfa/complete`
   - Headers: `Authorization: Bearer <mfaToken>` oppure `x-mfa-token: <mfaToken>`
   - Body: `{ "code": "123456" }`
-  - Risposta: `{ user, accessToken }` e `Set-Cookie: refresh_token=...` (HttpOnly)
+  - Risposta: `{ user, accessToken }` e `Set-Cookie: refresh_token=...; HttpOnly` + `Set-Cookie: access_token=...; HttpOnly`
 
 Altri endpoint
-- `POST /v1/tenant/auth/refresh` → ruota refresh e rilascia nuovo `accessToken` (usa cookie HttpOnly)
+- `POST /v1/tenant/auth/refresh` → ruota refresh, emette nuovo `access_token` come cookie HttpOnly (ritorna anche `accessToken` nel body per compatibilità)
 - `POST /v1/tenant/auth/logout` → revoca la sessione di refresh corrente
-- `GET /v1/tenant/auth/me` → profilo utente (richiede `Authorization: Bearer <accessToken>`)
+- `GET /v1/tenant/auth/me` → profilo utente (accetta `access_token` da cookie HttpOnly o `Authorization: Bearer <accessToken>`) 
 
 ## Tenant Reports (Sicurezza & Uso)
 
@@ -237,6 +237,24 @@ Output atteso: `Access-Control-Allow-Headers` include `authorization` (e `x-mfa-
 - `COOKIE_DOMAIN` → dominio cookie refresh (in dev: `localhost`)
 - `API_BASE_URL`, `FRONTEND_BASE_URL` → URL base per FE/BE in locale
 - JWT/MFA: `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `ACCESS_TTL`, `REFRESH_TTL`, `JWT_MFA_SECRET`, `MFA_TOKEN_TTL`, `MFA_ISSUER`
+
+## Cookie & Sicurezza (env)
+
+- Cookie di sessione
+  - `ACCESS_TTL` (default `900s`)
+  - `REFRESH_TTL` (default `30d`, ridurre a 1–7 giorni in dev)
+  - `COOKIE_DOMAIN` (es. `localhost` in dev; `.tuodominio.tld` in prod)
+  - `COOKIE_SECURE` (`true`/`false`, default: `true` in prod, `false` altrove)
+  - `COOKIE_SAMESITE` (`lax` | `none` | `strict`; default `lax`; in cross-site prod usare `none` + `secure=true`)
+
+- CORS
+  - `CORS_ALLOWED_ORIGINS` (CSV) o `FRONTEND_BASE_URL` singolo origin; richiesto in prod con `credentials:true`.
+
+- CSRF opzionale (double submit cookie)
+  - `CSRF_PROTECTION=true` abilita controllo su `POST/PUT/PATCH/DELETE` con header `X-CSRF-Token` uguale al cookie `XSRF-TOKEN`.
+  - Escluso `GET/HEAD/OPTIONS` e `POST /v1/tenant/auth/refresh`.
+
+Nota: Il BE imposta `access_token` e `refresh_token` come cookie HttpOnly; il FE deve usare `withCredentials: true`.
 
 ## Logging
 - `HTTP_LOG_ENABLED` → se true, stampa un log sintetico per ogni richiesta con `x-request-id`, metodo, URL, status e durata.

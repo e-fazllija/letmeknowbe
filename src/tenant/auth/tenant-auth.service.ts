@@ -11,6 +11,7 @@ import * as bcrypt from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { Request, Response } from 'express';
+import { cookieEnv, setAccessCookie as setAccessCookieUtil, setRefreshCookie as setRefreshCookieUtil, clearAccessCookie as clearAccessCookieUtil, clearRefreshCookie as clearRefreshCookieUtil } from '../../common/auth/cookie.util';
 import { authenticator } from 'otplib';
 import { MfaCodeDto, MfaRecoveryDto } from './dto/mfa-code.dto';
 import {
@@ -456,22 +457,23 @@ export class TenantAuthService {
   }
 
   setRefreshCookie(res: Response, refreshToken: string) {
-    const secure = process.env.NODE_ENV === 'production';
-    const domain = process.env.COOKIE_DOMAIN || undefined;
-    res.cookie('refresh_token', refreshToken, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure,
-      domain,
-      path: '/',
-      // maxAge derive from REFRESH_TTL? leave to token expiry; we can set 30d as fallback
-      maxAge: this.ttlToMs(process.env.REFRESH_TTL || '30d'),
-    });
+    const opts = cookieEnv();
+    setRefreshCookieUtil(res, refreshToken, opts);
+  }
+
+  setAccessCookie(res: Response, accessToken: string) {
+    const opts = cookieEnv();
+    setAccessCookieUtil(res, accessToken, opts);
   }
 
   clearRefreshCookie(res: Response) {
-    const domain = process.env.COOKIE_DOMAIN || undefined;
-    res.clearCookie('refresh_token', { path: '/', domain });
+    const opts = cookieEnv();
+    clearRefreshCookieUtil(res, opts);
+  }
+
+  clearAccessCookie(res: Response) {
+    const opts = cookieEnv();
+    clearAccessCookieUtil(res, opts);
   }
 
   private addTtlToNow(ttl: string): Date {
@@ -485,6 +487,39 @@ export class TenantAuthService {
     const unit = m[2] || 's';
     const mult = unit === 's' ? 1000 : unit === 'm' ? 60 * 1000 : unit === 'h' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
     return val * mult;
+  }
+
+  async buildProfile(userId: string) {
+    const user = await this.prisma.internalUser.findUnique({
+      where: { id: userId },
+      select: { id: true, clientId: true, email: true, role: true },
+    });
+    if (!user) throw new UnauthorizedException('User not found');
+
+    const role = (user.role || 'ADMIN').toString();
+    const roleLower = role.toLowerCase();
+    const permissions = this.permissionsForRole(role);
+
+    return {
+      userId: user.id,
+      clientId: user.clientId,
+      email: user.email,
+      role: roleLower,
+      permissions,
+    };
+  }
+
+  private permissionsForRole(role: string): string[] {
+    switch (role) {
+      case 'ADMIN':
+        return ['REPORTS_VIEW', 'REPORT_CREATE'];
+      case 'AGENT':
+        return ['REPORTS_VIEW', 'REPORT_CREATE'];
+      case 'AUDITOR':
+        return ['REPORTS_VIEW'];
+      default:
+        return ['REPORTS_VIEW'];
+    }
   }
 }
 

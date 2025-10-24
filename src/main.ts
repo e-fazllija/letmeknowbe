@@ -7,6 +7,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import * as crypto from 'crypto';
 import { sanitizeUrl } from './common/logging/sanitize-url';
+import { csrfMiddleware } from './common/middleware/csrf.middleware';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -37,24 +38,26 @@ async function bootstrap() {
   app.use(json({ limit: '1mb' }));
   app.use(urlencoded({ extended: true, limit: '1mb' }));
 
-  // Abilita CORS (tutti gli origin, utile per test)
+  // Abilita CORS (credentials:true) – evita '*'
   const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
-  const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+  const allowedOriginsCsv = process.env.CORS_ALLOWED_ORIGINS || process.env.FRONTEND_BASE_URL || '';
+  const allowedOrigins = allowedOriginsCsv
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const corsOrigin: any = isProd && allowedOrigins.length > 0
-    ? (origin: string | undefined, cb: (err: Error | null, ok?: boolean) => void) => {
-        if (!origin) return cb(null, true);
-        if (allowedOrigins.includes(origin)) return cb(null, true);
-        return cb(new Error('Not allowed by CORS'));
-      }
-    : true;
+  const corsOrigin: any = allowedOrigins.length > 0
+    ? allowedOrigins
+    : (isProd
+        ? (origin: string | undefined, cb: (err: Error | null, ok?: boolean) => void) => {
+            if (!origin) return cb(new Error('Origin required'));
+            return cb(new Error('Not allowed by CORS'));
+          }
+        : true);
 
   // In produzione non esponiamo/accettiamo x-tenant-id dal browser
   // Autorizziamo esplicitamente Authorization (necessario per MFA bearer) e, in dev, anche header custom usati dal FE
-  const baseAllowed = ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'];
+  const baseAllowed = ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With', 'X-CSRF-Token'];
   const allowedHeaders = isProd ? baseAllowed : [...baseAllowed, 'x-tenant-id', 'x-mfa-token'];
   app.enableCors({
     origin: corsOrigin,
@@ -64,6 +67,7 @@ async function bootstrap() {
   });
 
   // Cookie parser per gestire refresh token HttpOnly
+  app.use(csrfMiddleware);
 
   // Prefisso globale (facoltativo)
   app.setGlobalPrefix('v1');
@@ -112,6 +116,17 @@ async function bootstrap() {
           'Inserisci qui l`ID del tenant se necessario per identificare il contesto multi-tenant.<br>Esempio: <code>intent-001</code>',
       },
       'tenant-key',
+    )
+
+    // CSRF header opzionale (double-submit cookie)
+    .addApiKey(
+      {
+        type: 'apiKey',
+        name: 'X-CSRF-Token',
+        in: 'header',
+        description: 'Token CSRF (uguale al cookie XSRF-TOKEN) quando CSRF_PROTECTION=true',
+      },
+      'csrf-token',
     )
 
     .build();

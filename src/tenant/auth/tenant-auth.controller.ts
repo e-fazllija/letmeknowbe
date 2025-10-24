@@ -46,6 +46,7 @@ export class TenantAuthController {
     }
 
     this.service.setRefreshCookie(res, result.refreshToken);
+    this.service.setAccessCookie(res, result.accessToken);
     return {
       message: 'Login effettuato con successo',
       user: result.user,
@@ -89,6 +90,7 @@ export class TenantAuthController {
   ) {
     const result = await this.service.completeMfa(mfaToken || authorization, dto, req);
     this.service.setRefreshCookie(res, result.refreshToken);
+    this.service.setAccessCookie(res, result.accessToken);
     return {
       message: 'Login completato con successo',
       user: result.user,
@@ -110,6 +112,7 @@ export class TenantAuthController {
   ) {
     const result = await this.service.completeMfaWithRecovery(mfaToken || authorization, dto, req);
     this.service.setRefreshCookie(res, result.refreshToken);
+    this.service.setAccessCookie(res, result.accessToken);
     return {
       message: 'Login completato con codice di recupero',
       user: result.user,
@@ -124,6 +127,7 @@ export class TenantAuthController {
   async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const { accessToken, refreshToken } = await this.service.refresh(req);
     this.service.setRefreshCookie(res, refreshToken);
+    this.service.setAccessCookie(res, accessToken);
     return { accessToken };
   }
 
@@ -134,13 +138,14 @@ export class TenantAuthController {
   async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     await this.service.logout(req);
     this.service.clearRefreshCookie(res);
+    this.service.clearAccessCookie(res);
   }
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Ritorna il profilo utente corrente (JWT access)' })
   me(@Req() req: Request) {
-    return { user: (req as any).user };
+    const payload = (req as any).user as { sub: string };
+    return this.service.buildProfile(payload.sub);
   }
 }
