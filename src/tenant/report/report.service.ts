@@ -400,17 +400,12 @@ export class ReportService {
    * PATCH — aggiorna lo stato della segnalazione
    */
   async updateStatus(req: any, reportId: string, dto: CreateReportStatusDto) {
-    const report = await this.prisma.whistleReport.findUnique({
-      where: { id: reportId },
+    const tokenClientId = req?.user?.clientId as string | undefined;
+    if (!tokenClientId) throw new BadRequestException('Tenant non valido');
+    const report = await this.prisma.whistleReport.findFirst({
+      where: { id: reportId, clientId: tokenClientId },
     });
     if (!report) throw new NotFoundException('Segnalazione non trovata');
-
-    const tokenClientId = req?.user?.clientId as string | undefined;
-    if (!tokenClientId || tokenClientId !== report.clientId || tokenClientId !== dto.clientId) {
-      // eslint-disable-next-line no-console
-      console.warn('updateStatus forbidden: tenant mismatch');
-      throw new ForbiddenException('Operazione non consentita');
-    }
 
     const now = new Date();
     const newStatus = dto.status as ReportStatus;

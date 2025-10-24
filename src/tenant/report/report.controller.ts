@@ -3,7 +3,7 @@ import { ReportService } from './report.service';
 // import { CreateReportDto } from './dto/create-report.dto';
 // import { CreateReportMessageDto } from './dto/create-report-message.dto';
 import { CreateReportStatusDto } from './dto/create-report-status.dto';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags, ApiExcludeEndpoint } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { Request } from 'express';
 import { Response } from 'express';
@@ -32,6 +32,7 @@ export class ReportController {
 
   // RECUPERA SEGNALAZIONE PUBBLICA TRAMITE TOKEN
   @Get('token/:token')
+  @ApiExcludeEndpoint()
   @ApiOperation({ summary: 'Recupera una segnalazione tramite token (utente pubblico)' })
   @ApiParam({ name: 'token', description: 'Token fornito al segnalante' })
   getByToken(@Param('token') token: string) {
@@ -129,19 +130,14 @@ export class ReportController {
 
   // PATCH — AGGIORNA STATO DEL REPORT
   @Patch(':reportId/status')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({
     summary: 'Aggiorna lo stato della segnalazione',
     description: 'Aggiorna esclusivamente lo stato (OPEN, IN_PROGRESS, SUSPENDED, NEED_INFO, CLOSED). I timestamp vengono aggiornati per OPEN/IN_PROGRESS/CLOSED.',
   })
   updateStatus(@Req() req: Request, @Param('reportId') reportId: string, @Body() dto: CreateReportStatusDto) {
-    const tokenClientId = (req as any)?.user?.clientId as string | undefined;
-    if (!tokenClientId || tokenClientId !== dto.clientId) {
-      // eslint-disable-next-line no-console
-      console.warn('updateStatus forbidden: token/clientId mismatch');
-      throw new ForbiddenException('Operazione non consentita');
-    }
     return this.service.updateStatus(req, reportId, dto);
   }
 

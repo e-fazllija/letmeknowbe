@@ -5,9 +5,10 @@ export const REPORT_STATUS_VALUES = ['OPEN', 'IN_PROGRESS', 'SUSPENDED', 'NEED_I
 
 
 export class CreateReportStatusDto {
-  @ApiProperty()
+  @ApiProperty({ required: false, description: 'Deriva dal token; opzionale' })
+  @IsOptional()
   @IsString()
-  clientId!: string;
+  clientId?: string;
 
   @ApiProperty()
   @IsString()
