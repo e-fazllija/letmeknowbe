@@ -1,0 +1,129 @@
+# FE/BE Alignment – Admin/Impostazioni (LetMeKnow)
+
+## Sommario
+
+- Copertura rotte attese: 18/30 ≈ 60.0%
+- Semafori complessivi:
+  - Autenticazione/Headers: 🟢 ok (Bearer su /v1/tenant/*; refresh ok; CORS ok; SameSite=Lax)
+  - Ruoli/Guardie: 🟢 ok (Users protette; PATCH report status protetta)
+  - DTO/Response: 🟢 ok (Users select sicuro; clientId opzionale su PATCH status)
+  - Tenant scoping: 🟠 parziale (Users/Reports/Departments/Categories ok; PublicUser ancora non filtrato per tenant)
+  - Prisma modelli: 🟠 parziale (aggiunte unique Department/Category; ancora mancanti CasePolicy/Templates/BillingProfile/PaymentMethod)
+  - Rate limit/429/Retry-After: 🟢 ok (header Retry-After aggiunto su 429)
+  - Stats endpoint: 🟢 presente
+
+---
+
+## Matrice Rotte (Implemented vs Expected)
+
+Resource | Method | Path | Expected | Implemented | Auth/Role | Note/Fix
+---|---|---|---|---|---|---
+Users | GET | /v1/tenant/users | ✅ | ✅ | ADMIN | Select sicuro + scoping clientId.
+Users | POST | /v1/tenant/users/invite | ✅ | ✅ | ADMIN | Crea INVITED + UserToken{INVITE} (email TODO).
+Users | PATCH | /v1/tenant/users/{id}/role | ✅ | ✅ | ADMIN | Path differente: PATCH /v1/tenant/users/{id}. Role aggiornabile; scoping ok.
+Users | DELETE | /v1/tenant/users/{id} | ✅ | ✅ | ADMIN | Soft delete (status=SUSPENDED) + scoping clientId.
+Departments | GET | /v1/tenant/departments | ✅ | ✅ | ADMIN/AGENT | OK (id,name) + scoping clientId.
+Departments | POST | /v1/tenant/departments | ✅ | ✅ | ADMIN | OK.
+Departments | PATCH | /v1/tenant/departments/{id} | ✅ | ✅ | ADMIN | OK.
+Departments | DELETE | /v1/tenant/departments/{id} | ✅ | ✅ | ADMIN | Soft delete (active=false).
+Categories | GET | /v1/tenant/categories | ✅ | ✅ | ADMIN/AGENT | OK (?departmentId) + scoping.
+Categories | POST | /v1/tenant/categories | ✅ | ✅ | ADMIN | OK.
+Categories | PATCH | /v1/tenant/categories/{id} | ✅ | ✅ | ADMIN | OK.
+Categories | DELETE | /v1/tenant/categories/{id} | ✅ | ✅ | ADMIN | Soft delete (active=false).
+CasePolicy | GET | /v1/tenant/case-policy | ✅ | ❌ | n/a | Mancante.
+CasePolicy | PUT | /v1/tenant/case-policy | ✅ | ❌ | n/a | Mancante.
+Templates | GET | /v1/tenant/templates | ✅ | ❌ | n/a | Mancante.
+Templates | POST | /v1/tenant/templates | ✅ | ❌ | n/a | Mancante.
+Templates | PATCH | /v1/tenant/templates/{id} | ✅ | ❌ | n/a | Mancante.
+Templates | DELETE | /v1/tenant/templates/{id} | ✅ | ❌ | n/a | Mancante.
+Billing | GET | /v1/tenant/billing/profile | ✅ | ❌ | n/a | Mancante (billing in PUBLIC).
+Billing | PUT | /v1/tenant/billing/profile | ✅ | ❌ | n/a | Mancante.
+Billing | GET | /v1/tenant/subscription | ✅ | ❌ | n/a | Mancante.
+Billing | PUT | /v1/tenant/subscription | ✅ | ❌ | n/a | Mancante.
+Billing | GET | /v1/tenant/payment-method | ✅ | ❌ | n/a | Mancante.
+Billing | PUT | /v1/tenant/payment-method | ✅ | ❌ | n/a | Mancante.
+Stats | GET | /v1/tenant/stats | ✅ | ✅ | ADMIN/AGENT | Implementato con cache 10m.
+Reports | GET | /v1/tenant/reports | ✅ | ✅ | ADMIN/AGENT/AUDITOR | Richiede clientId in query (match con token).
+Reports | GET | /v1/tenant/reports/{reportId}/messages | ✅ | ✅ | ADMIN/AGENT | OK.
+Reports | POST | /v1/tenant/reports/message | ✅ | ✅ | ADMIN/AGENT | OK.
+Reports | PATCH | /v1/tenant/reports/{reportId}/status | ✅ | ✅ | ADMIN/AGENT | Roles protette; clientId opzionale nel body.
+Reports | POST | /v1/tenant/reports | ✅ | ✅ | ADMIN/AGENT | OK.
+
+Extra BE (impatto):
+- GET /v1/tenant/reports/token/:token (nascosto da Swagger; impatto: basso; non usato dal FE Admin).
+- Controller tenant/public-users con path duplicato "v1/tenant/public-users" e senza guardie (impatto: medio; non in scope Admin).
+
+---
+
+## DTO Check (differenze principali)
+
+- GET /v1/tenant/users
+  - OK: select sicuro { id, email, role, createdAt } + scoping clientId.
+
+- POST /v1/tenant/users/invite
+  - OK: { email, role } → crea user INVITED + UserToken.
+
+- PATCH /v1/tenant/users/{id}/role
+  - OK: supportata via PATCH /v1/tenant/users/{id}.
+
+- PATCH /v1/tenant/reports/{id}/status
+  - OK: clientId nel body ora opzionale (deriva dal token). Campi extra note/author/agentId mantenuti.
+
+---
+
+## Auth & Headers
+
+- Bearer su /v1/tenant/*: 🟢 OK (Users/Departments/Categories/Stats protette con JwtAuthGuard+RolesGuard).
+- Refresh endpoint: 🟢 presente (/v1/tenant/auth/refresh) con cookie HttpOnly, SameSite=Lax, Secure in prod.
+- x-tenant-id solo su login: 🟢 OK (header usato su POST /v1/tenant/auth/login; altrove assente). Nei pubblici `TenantContextGuard` richiede header (corretto).
+- CORS: 🟢 credentials: true; allowedHeaders dinamici; in prod non esponge x-tenant-id.
+- Esclusioni refresh FE: 🟢 nessun blocco lato BE su /tenant/auth/login, /tenant/auth/mfa/*, /public/auth/activate.
+
+---
+
+## Tenant Scoping (punti critici)
+
+- UserService: OK, tutte le query filtrate per clientId; delete → soft.
+- Department/Category: OK, filtro per clientId in tutte le operazioni; soft delete.
+- ReportService: OK, updateStatus ora usa where { id, clientId } e non richiede clientId nel body.
+- PublicUserService: ancora senza filtro clientId (fuori area Admin, ma consigliato).
+
+---
+
+## Prisma & Dati
+
+- Presenti: Department, Category, Client (PUBLIC), Subscription, InternalUser, PublicUser, WhistleReport, ReportMessage, ReportStatusHistory, ReportAttachment, UserToken, RefreshSession, UserRecoveryCode, ReportAccessLog.
+- Mancanti (tenants DB): CasePolicy, Template, TemplateQuestion, BillingProfile, PaymentMethod.
+- Vincoli univoci:
+  - Department: ✅ aggiunto unique (clientId, name).
+  - Category: ✅ aggiunto unique (clientId, departmentId, name).
+  - ReportStatusHistory: 🟢 append-only applicativo.
+
+---
+
+## Stats – implementazione
+
+Rotta `GET /v1/tenant/stats` implementata con aggregazioni minime (kpis/byMonth/bySource/byDepartment) e cache in-memory 10m per `clientId`.
+
+---
+
+## Piano di Fix (residui)
+
+1) CasePolicy: model booleans + GET/PUT.
+2) Templates: Template(+TemplateQuestion) CRUD.
+3) Billing tenant: wrapper profile/subscription/payment-method dal PUBLIC.
+4) Rifinire PublicUser scoping (non Admin).
+5) Migliorare aggregazioni stats (statusOverTime) opzionale.
+
+---
+
+## Estratto Sommario & Top Fix
+
+- Copertura: 60.0% (18/30). Rotte Admin principali coperte.
+- Top 5 Fix (residui):
+  1) Implementare CasePolicy (GET/PUT) tenant-scoped.
+  2) Implementare Templates CRUD (Template + TemplateQuestion).
+  3) Wrapper Billing tenant (profile/subscription/payment-method) dal PUBLIC.
+  4) Rifinire PublicUser scoping (fuori area Admin, ma consigliato).
+  5) Migliorare aggregazioni stats (statusOverTime) opzionale.
+
