@@ -45,8 +45,15 @@ export class UserController {
     return this.service.updateByClient(clientId, id, dto);
   }
 
+  @Patch(':id/role')
+  @ApiOperation({ summary: 'Alias (compat): aggiorna solo il ruolo utente', description: 'Compatibilità FE: alias di PATCH /v1/tenant/users/{id} con body { role }' })
+  updateRole(@Req() req: Request, @Param('id') id: string, @Body('role') role: string) {
+    const clientId = (req as any)?.user?.clientId as string;
+    return this.service.updateByClient(clientId, id, { role: role as any });
+  }
+
   @Delete(':id')
-  @ApiOperation({ summary: 'Elimina gli AGENT o ADMIN nella tabella internaluser tramite id utente' })
+  @ApiOperation({ summary: 'Elimina (soft) un utente', description: 'Soft delete: imposta status=SUSPENDED (non rimuove dal DB)' })
   @HttpCode(204)
   remove(@Req() req: Request, @Param('id') id: string) {
     const clientId = (req as any)?.user?.clientId as string;

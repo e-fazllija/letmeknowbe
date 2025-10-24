@@ -52,8 +52,8 @@ export class ReportController {
 
   // ELENCO SEGNALAZIONI (PER CLIENT)
   @Get()
-  @ApiOperation({ summary: 'Elenco segnalazioni per cliente (admin/agent)' })
-  @ApiQuery({ name: 'clientId', required: true })
+  @ApiOperation({ summary: 'Elenco segnalazioni per cliente (admin/agent)', description: 'Parametro clientId opzionale: se assente viene usato quello del token JWT' })
+  @ApiQuery({ name: 'clientId', required: false })
   @ApiQuery({ name: 'page', required: false, description: 'Pagina (base 1)', schema: { type: 'integer', minimum: 1, default: 1 } })
   @ApiQuery({ name: 'pageSize', required: false, description: 'Dimensione pagina (max 100)', schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 } })
   @ApiQuery({ name: 'status', required: false, description: 'Filtra per stato (CSV: OPEN,IN_PROGRESS,...)' })
@@ -65,7 +65,7 @@ export class ReportController {
   @ApiBearerAuth('access-token')
   listReports(
     @Req() req: Request,
-    @Query('clientId') clientId: string,
+    @Query('clientId') clientId?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
     @Query('status') status?: string,
@@ -74,7 +74,8 @@ export class ReportController {
     @Query('q') q?: string,
   ) {
     const tokenClientId = (req as any)?.user?.clientId as string | undefined;
-    if (!tokenClientId || tokenClientId !== clientId) {
+    const effectiveClientId = clientId || tokenClientId;
+    if (!tokenClientId || !effectiveClientId || tokenClientId !== effectiveClientId) {
       // Log sintetico per audit senza esporre dati sensibili
       // eslint-disable-next-line no-console
       console.warn('listReports forbidden: token/clientId mismatch');
@@ -83,7 +84,7 @@ export class ReportController {
     const p = Math.max(parseInt(page || '1', 10) || 1, 1);
     const psRaw = parseInt(pageSize || '20', 10) || 20;
     const ps = Math.min(Math.max(psRaw, 1), 100);
-    return this.service.listReports(clientId, {
+    return this.service.listReports(effectiveClientId, {
       page: p,
       pageSize: ps,
       status,
