@@ -128,3 +128,4 @@ Rotta `GET /v1/tenant/stats` implementata con aggregazioni minime (kpis/byMonth/
   5) Migliorare aggregazioni stats (statusOverTime) opzionale.
 
 
+

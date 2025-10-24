@@ -36,19 +36,6 @@
                    },
                    {
                        "resource":  "users",
-                       "method":  "PATCH",
-                       "path":  "/v1/tenant/users/{id}/role",
-                       "expected":  true,
-                       "implemented":  true,
-                       "roles":  [
-                                     "ADMIN"
-                                 ],
-                       "dto_issues":  [
-                                          "path differs: PATCH /v1/tenant/users/{id}"
-                                      ]
-                   },
-                   {
-                       "resource":  "users",
                        "method":  "DELETE",
                        "path":  "/v1/tenant/users/{id}",
                        "expected":  true,
@@ -403,6 +390,19 @@
                        "path":  "/v1/tenant/payment-method",
                        "method":  "PUT",
                        "resource":  "billing",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/users/{id}/role",
+                       "method":  "PATCH",
+                       "resource":  "users",
                        "expected":  true,
                        "dto_issues":  [
 
