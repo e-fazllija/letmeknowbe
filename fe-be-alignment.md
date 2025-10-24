@@ -30,18 +30,18 @@ Categories | GET | /v1/tenant/categories | ✅ | ✅ | ADMIN/AGENT | OK (?depart
 Categories | POST | /v1/tenant/categories | ✅ | ✅ | ADMIN | OK.
 Categories | PATCH | /v1/tenant/categories/{id} | ✅ | ✅ | ADMIN | OK.
 Categories | DELETE | /v1/tenant/categories/{id} | ✅ | ✅ | ADMIN | Soft delete (active=false).
-CasePolicy | GET | /v1/tenant/case-policy | ✅ | ❌ | n/a | Mancante.
-CasePolicy | PUT | /v1/tenant/case-policy | ✅ | ❌ | n/a | Mancante.
-Templates | GET | /v1/tenant/templates | ✅ | ❌ | n/a | Mancante.
-Templates | POST | /v1/tenant/templates | ✅ | ❌ | n/a | Mancante.
-Templates | PATCH | /v1/tenant/templates/{id} | ✅ | ❌ | n/a | Mancante.
-Templates | DELETE | /v1/tenant/templates/{id} | ✅ | ❌ | n/a | Mancante.
-Billing | GET | /v1/tenant/billing/profile | ✅ | ❌ | n/a | Mancante (billing in PUBLIC).
-Billing | PUT | /v1/tenant/billing/profile | ✅ | ❌ | n/a | Mancante.
-Billing | GET | /v1/tenant/subscription | ✅ | ❌ | n/a | Mancante.
-Billing | PUT | /v1/tenant/subscription | ✅ | ❌ | n/a | Mancante.
-Billing | GET | /v1/tenant/payment-method | ✅ | ❌ | n/a | Mancante.
-Billing | PUT | /v1/tenant/payment-method | ✅ | ❌ | n/a | Mancante.
+CasePolicy | GET | /v1/tenant/case-policy | ? | ? | ADMIN | OK (default on-the-fly, upsert).
+CasePolicy | PUT | /v1/tenant/case-policy | ? | ? | ADMIN | OK.
+Templates | GET | /v1/tenant/templates | ? | ? | ADMIN/AGENT | OK (con questions id/label/order).
+Templates | POST | /v1/tenant/templates | ? | ? | ADMIN | OK (crea + createMany questions).
+Templates | PATCH | /v1/tenant/templates/{id} | ? | ? | ADMIN | OK (sostituzione semplice domande).
+Templates | DELETE | /v1/tenant/templates/{id} | ? | ? | ADMIN | OK (cascade domande).
+Billing | GET | /v1/tenant/billing/profile | ? | ? | ADMIN | OK (tenant model BillingProfile).
+Billing | PUT | /v1/tenant/billing/profile | ? | ? | ADMIN | OK.
+Billing | GET | /v1/tenant/subscription | ? | ? | ADMIN | Wrapper su Subscription tenant.
+Billing | PUT | /v1/tenant/subscription | ? | ? | ADMIN | Aggiorna cycle/status.
+Billing | GET | /v1/tenant/payment-method | ? | ? | ADMIN | OK (mascherato, tenant model).
+Billing | PUT | /v1/tenant/payment-method | ? | ? | ADMIN | OK.
 Stats | GET | /v1/tenant/stats | ✅ | ✅ | ADMIN/AGENT | Implementato con cache 10m.
 Reports | GET | /v1/tenant/reports | ✅ | ✅ | ADMIN/AGENT/AUDITOR | Richiede clientId in query (match con token).
 Reports | GET | /v1/tenant/reports/{reportId}/messages | ✅ | ✅ | ADMIN/AGENT | OK.
@@ -93,7 +93,7 @@ Extra BE (impatto):
 ## Prisma & Dati
 
 - Presenti: Department, Category, Client (PUBLIC), Subscription, InternalUser, PublicUser, WhistleReport, ReportMessage, ReportStatusHistory, ReportAttachment, UserToken, RefreshSession, UserRecoveryCode, ReportAccessLog.
-- Mancanti (tenants DB): CasePolicy, Template, TemplateQuestion, BillingProfile, PaymentMethod.
+- Aggiunti: CasePolicy, Template, TemplateQuestion, BillingProfile, PaymentMethod.
 - Vincoli univoci:
   - Department: ✅ aggiunto unique (clientId, name).
   - Category: ✅ aggiunto unique (clientId, departmentId, name).
@@ -126,4 +126,5 @@ Rotta `GET /v1/tenant/stats` implementata con aggregazioni minime (kpis/byMonth/
   3) Wrapper Billing tenant (profile/subscription/payment-method) dal PUBLIC.
   4) Rifinire PublicUser scoping (fuori area Admin, ma consigliato).
   5) Migliorare aggregazioni stats (statusOverTime) opzionale.
+
 
