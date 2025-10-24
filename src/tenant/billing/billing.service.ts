@@ -54,7 +54,7 @@ export class BillingService {
 
   async getPaymentMethod(clientId: string) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
-    const pm = await (this.prisma as any).paymentMethod.findUnique({ where: { clientId } });
+    const pm = await (this.prisma as any).billingPaymentMethod.findUnique({ where: { clientId } });
     return pm || { type: 'CARTA', masked: '**** **** **** 1234' };
   }
 
@@ -62,7 +62,6 @@ export class BillingService {
     if (!clientId) throw new BadRequestException('Tenant non valido');
     const type = typeof body?.type === 'string' ? body.type : 'CARTA';
     const masked = typeof body?.masked === 'string' ? body.masked : '**** **** **** 1234';
-    return (this.prisma as any).paymentMethod.upsert({ where: { clientId }, update: { type, masked }, create: { clientId, type, masked } });
+    return (this.prisma as any).billingPaymentMethod.upsert({ where: { clientId }, update: { type, masked }, create: { clientId, type, masked } });
   }
 }
-

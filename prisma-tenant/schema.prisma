@@ -457,7 +457,7 @@ model BillingProfile {
 }
 
 // Payment method minimo in tenant (mascherato)
-model PaymentMethod {
+model BillingPaymentMethod {
   clientId  String   @id
   type      String
   masked    String
