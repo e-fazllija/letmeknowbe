@@ -26,8 +26,8 @@ Prerequisiti
 - `x-tenant-id` disponibile in dev (in prod lo inietta il proxy). In prod abilita `TENANT_ID_ALLOWLIST`.
 - Il tenant ha almeno un `Department` attivo e relative `Category` attive.
 - Migrazioni applicate e Prisma generato (tenant):
-  - `npx prisma migrate deploy --schema prisma-tenant/schema.prisma`
-  - `npx prisma generate --schema prisma-tenant/schema.prisma`
+- `npx prisma migrate deploy --schema prisma-tenant/schema.prisma`
+- `npx prisma generate --schema prisma-tenant/schema.prisma`
 
 Env utili (dev)
 - `PRESIGN_ENABLED=false` (presign disabilitato → allegati rifiutati su create; endpoint presign → 501)

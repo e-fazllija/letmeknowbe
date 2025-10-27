@@ -1,5 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEmail, IsString } from 'class-validator';
+import { IsEmail, IsEnum, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { UserRole } from '../../../generated/tenant';
 
 export class SignupDto {
   @ApiProperty()
@@ -14,8 +16,9 @@ export class SignupDto {
   @IsString()
   password!: string;
 
-  @ApiProperty({ example: 'ADMIN' })
-  @IsString()
-  role!: string;
+  @ApiProperty({ enum: UserRole, example: 'ADMIN' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.toUpperCase() : value))
+  @IsEnum(UserRole)
+  role!: UserRole;
 }
  

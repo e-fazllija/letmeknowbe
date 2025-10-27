@@ -67,6 +67,11 @@ export class TenantAuthService {
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const roleNorm = (dto.role as any)?.toString?.().toUpperCase?.();
+    const allowed = new Set(['ADMIN', 'AGENT', 'AUDITOR']);
+    if (!roleNorm || !allowed.has(roleNorm)) {
+      throw new BadRequestException('Ruolo non valido');
+    }
 
     try {
       const user = await this.prisma.internalUser.create({
@@ -74,7 +79,7 @@ export class TenantAuthService {
           clientId: dto.clientId,
           email,
           password: hashedPassword,
-          role: dto.role as any, 
+          role: roleNorm as any,
           status: 'ACTIVE' as any,
         },
         select: {
@@ -498,7 +503,7 @@ export class TenantAuthService {
 
     const role = (user.role || 'ADMIN').toString();
     const roleLower = role.toLowerCase();
-    const permissions = this.permissionsForRole(role);
+    const permissions = this.permissionsForRole(role.toUpperCase());
 
     return {
       userId: user.id,

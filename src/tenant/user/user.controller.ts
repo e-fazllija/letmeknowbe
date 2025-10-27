@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards, HttpCode } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards, HttpCode, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -49,7 +49,12 @@ export class UserController {
   @ApiOperation({ summary: 'Alias (compat): aggiorna solo il ruolo utente', description: 'Compatibilità FE: alias di PATCH /v1/tenant/users/{id} con body { role }' })
   updateRole(@Req() req: Request, @Param('id') id: string, @Body('role') role: string) {
     const clientId = (req as any)?.user?.clientId as string;
-    return this.service.updateByClient(clientId, id, { role: role as any });
+    const next = (role || '').toString().toUpperCase();
+    const allowed = new Set(['ADMIN', 'AGENT', 'AUDITOR']);
+    if (!allowed.has(next)) {
+      throw new BadRequestException('Ruolo non valido');
+    }
+    return this.service.updateByClient(clientId, id, { role: next as any });
   }
 
   @Delete(':id')
