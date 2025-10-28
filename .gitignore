@@ -1,6 +1,7 @@
 ### Project-specific
 mattarella/
 models/
+!models/.gitkeep
 models.rar
 
 ### Python bytecode
