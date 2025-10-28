@@ -8,7 +8,7 @@ generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/public"
 }
- 
+
 datasource db {
   provider = "postgresql"
   url      = env("PUBLIC_DATABASE_URL") // es: postgresql://postgres:password@localhost:5432/whistledb_INTENT
@@ -18,7 +18,7 @@ enum PaymentMethod {
   CARTA
   BONIFICO
 }
- 
+
 enum EmployeeRange {
   DA_0_A_50
   DA_51_A_100
@@ -58,17 +58,17 @@ enum SubscriptionStatus {
 
 // CLIENT (azienda)
 model Client {
-  id            String          @id @default(cuid())
+  id            String         @id @default(cuid())
   companyName   String
   contactEmail  String
-  status        ClientStatus    @default(ACTIVE)
+  status        ClientStatus   @default(ACTIVE)
   employeeRange EmployeeRange
   subscriptions Subscription[]
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   // Billing fields (fonte di verità in PUBLIC)
-  billingTaxId        String      @unique
+  billingTaxId        String  @unique
   billingEmail        String
   billingPec          String?
   billingSdiCode      String?
@@ -83,18 +83,18 @@ model Client {
 
 // ABBONAMENTI
 model Subscription {
-  id        String           @id @default(cuid())
-  clientId  String
-  client    Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  amount    Decimal          @db.Decimal(10,2)
-  currency  String           @default("EUR")
-  billingCycle BillingCycle
-  contractTerm ContractTerm
-  method       PaymentMethod
-  status       SubscriptionStatus @default(ACTIVE)
-  startsAt     DateTime           @default(now())
+  id            String             @id @default(cuid())
+  clientId      String
+  client        Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  amount        Decimal            @db.Decimal(10, 2)
+  currency      String             @default("EUR")
+  billingCycle  BillingCycle
+  contractTerm  ContractTerm
+  method        PaymentMethod
+  status        SubscriptionStatus @default(ACTIVE)
+  startsAt      DateTime           @default(now())
   nextBillingAt DateTime?
   trialEndsAt   DateTime?
   canceledAt    DateTime?
-  createdAt    DateTime           @default(now())
+  createdAt     DateTime           @default(now())
 }

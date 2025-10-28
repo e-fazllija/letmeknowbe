@@ -242,6 +242,9 @@ model WhistleReport {
   internalUserId String?
   internalUser   InternalUser? @relation("UserReports", fields: [internalUserId], references: [id])
 
+  // Assegnazione casi
+  assignedAt DateTime?
+
   publicUsers PublicUser[]
   messages    ReportMessage[]
   statusLogs  ReportStatusHistory[]
@@ -251,6 +254,7 @@ model WhistleReport {
   @@index([clientId])
   @@index([status])
   @@index([clientId, publicCode])
+  @@index([internalUserId])
 }
 
 // Messaggi delle segnalazioni
@@ -432,12 +436,12 @@ model Template {
 }
 
 model TemplateQuestion {
-  id         String   @id @default(cuid())
+  id         String @id @default(cuid())
   templateId String
   label      String
-  order      Int      @default(0)
+  order      Int    @default(0)
 
-  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  template Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
 
   @@index([templateId])
 }

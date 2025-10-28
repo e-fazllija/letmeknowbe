@@ -85,7 +85,7 @@ export class ReportController {
     const p = Math.max(parseInt(page || '1', 10) || 1, 1);
     const psRaw = parseInt(pageSize || '20', 10) || 20;
     const ps = Math.min(Math.max(psRaw, 1), 100);
-    return this.service.listReports(effectiveClientId, {
+    return this.service.listReports(req, effectiveClientId, {
       page: p,
       pageSize: ps,
       status,
@@ -270,6 +270,38 @@ updateMessageBody(
     const { buffer, filename } = await this.service.exportPdf(req, reportId);
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     return buffer;
+  }
+
+  // ASSEGNAZIONI
+  @Post(':reportId/assign/me')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Assegna a sé stessi il caso (se unassigned)', description: 'Race safe: fallisce se già assegnato' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  assignMe(@Req() req: Request, @Param('reportId') reportId: string) {
+    return this.service.assignMe(req, reportId);
+  }
+
+  @Post(':reportId/assign')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Assegna il caso a un altro utente (ADMIN)' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  @ApiBody({ schema: { type: 'object', properties: { userId: { type: 'string' } }, required: ['userId'] } })
+  assignTo(@Req() req: Request, @Param('reportId') reportId: string, @Body('userId') userId: string) {
+    return this.service.assignTo(req, reportId, userId);
+  }
+
+  @Post(':reportId/unassign')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Rimuove l\'assegnazione (ADMIN)' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  unassign(@Req() req: Request, @Param('reportId') reportId: string) {
+    return this.service.unassign(req, reportId);
   }
 }
 

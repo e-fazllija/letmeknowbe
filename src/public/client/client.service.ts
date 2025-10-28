@@ -140,6 +140,7 @@ export class ClientService {
           role: 'ADMIN' as any,
           status: 'INVITED' as any,
           isOwner: true,
+          canViewAllCases: true,
         },
         select: { id: true, email: true },
       });

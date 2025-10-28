@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, ForbiddenException, NotImplementedException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, ForbiddenException, NotImplementedException, ConflictException } from '@nestjs/common';
 import { PrismaTenantService } from '../prisma-tenant.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { CreateReportMessageDto } from './dto/create-report-message.dto';
@@ -33,6 +33,8 @@ export class ReportService {
   async getDetailAndAck(req: any, reportId: string) {
     const tenantId = req?.user?.clientId as string | undefined;
     if (!tenantId) throw new BadRequestException('Tenant non valido');
+    const userId = req?.user?.sub as string | undefined;
+    const userRole = ((req?.user?.role as string) || 'ADMIN').toUpperCase();
 
     let report = await this.prisma.whistleReport.findFirst({
       where: { id: reportId, clientId: tenantId },
@@ -45,12 +47,66 @@ export class ReportService {
     });
     if (!report) throw new NotFoundException('Segnalazione non trovata');
 
-    if (!report.acknowledgeAt) {
+    // Visibilità: se assegnato ad altri e l'utente non ha canViewAllCases, blocca
+    if (report.internalUserId && userId && report.internalUserId !== userId) {
+      const viewer = await this.prisma.internalUser.findUnique({ where: { id: userId }, select: { canViewAllCases: true } });
+      if (!viewer?.canViewAllCases) {
+        // privacy hardening: non rivelare l'esistenza
+        throw new NotFoundException('Segnalazione non trovata');
+      }
+    }
+
+    // Auto-claim FIRST_VIEW: se unassigned, assegna al primo che apre (ADMIN/AGENT)
+    const mode = (process.env.AUTO_ASSIGN_MODE || 'FIRST_VIEW').toUpperCase();
+    const eligible = userId && (userRole === 'ADMIN' || userRole === 'AGENT');
+    const requireActive = this.isTrue(process.env.CLAIM_REQUIRE_ACTIVE || 'true');
+    let canClaim = !!eligible;
+    if (canClaim && requireActive && userId) {
+      try {
+        const u = await this.prisma.internalUser.findUnique({ where: { id: userId }, select: { status: true } });
+        canClaim = ((u as any)?.status || 'ACTIVE') === 'ACTIVE';
+      } catch { canClaim = false; }
+    }
+    if (mode === 'FIRST_VIEW' && canClaim && !report.internalUserId) {
+      const now = new Date();
+      const updated = await this.prisma.whistleReport.updateMany({
+        where: { id: reportId, clientId: tenantId, internalUserId: null },
+        data: { internalUserId: userId, assignedAt: now },
+      });
+      if (updated.count === 1) {
+        // Audit message SYSTEM
+        await this.prisma.reportMessage.create({
+          data: {
+            clientId: tenantId,
+            reportId,
+            author: 'system',
+            body: 'Caso assegnato automaticamente al primo visualizzatore.',
+            note: 'CASE_ASSIGNED',
+            visibility: 'SYSTEM' as any,
+          },
+        });
+        // ricarica snapshot assegnato
+        report = await this.prisma.whistleReport.findFirst({
+          where: { id: reportId, clientId: tenantId },
+          include: {
+            messages: {
+              select: { id: true, author: true, body: true, note: true, createdAt: true, visibility: true },
+              orderBy: { createdAt: 'asc' },
+            },
+          },
+        });
+      }
+    }
+
+    // Type guard post-refresh
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+    const current = report; // non-null
+    if (!current.acknowledgeAt) {
       const now = new Date();
       const responseDays = parseInt(process.env.RESPONSE_TTL_DAYS || '90', 10);
       const dueAt = addDays(now, isNaN(responseDays) ? 90 : responseDays);
-      const repId = report.id;
-      const repClientId = report.clientId;
+      const repId = current.id;
+      const repClientId = current.clientId;
       await this.prisma.$transaction(async (tx) => {
         await tx.whistleReport.update({ where: { id: repId }, data: { acknowledgeAt: now, dueAt } });
         await tx.reportMessage.create({
@@ -96,6 +152,7 @@ export class ReportService {
   async createReportInternal(req: Request, body: any) {
     const user = (req as any).user || {};
     const tenantId = user.clientId as string;
+    const userId = user.sub as string | undefined;
     if (!tenantId) throw new BadRequestException('Tenant non valido');
 
     // Normalizzazione payload: nuovo schema o legacy
@@ -219,6 +276,10 @@ export class ReportService {
               containsPIISuspected: !!containsPII,
               ipHash,
               ua,
+              // Auto-assign al creatore backoffice (se presente)
+              internalUserId: userId || null,
+              assignedAt: userId ? now : null,
+              acknowledgeAt: now,
             },
           });
           await tx.publicUser.create({ data: { clientId: tenantId, token: tokenSha, reportId: r.id } });
@@ -231,6 +292,19 @@ export class ReportService {
                 sizeBytes: a.sizeBytes,
                 storageKey: a.storageKey,
               })),
+            });
+          }
+          // Audit: se assegnato al creatore, aggiungi SYSTEM note
+          if (userId) {
+            await tx.reportMessage.create({
+              data: {
+                clientId: tenantId,
+                reportId: r.id,
+                author: 'system',
+                body: 'Caso assegnato al creatore (backoffice).',
+                note: 'CASE_ASSIGNED',
+                visibility: 'SYSTEM' as any,
+              },
             });
           }
           return r;
@@ -290,7 +364,7 @@ export class ReportService {
   /**
    * Elenco segnalazioni per cliente (solo admin/agent)
    */
-  listReports(clientId: string, opts?: { page?: number; pageSize?: number; status?: string; departmentId?: string; categoryId?: string; q?: string }) {
+  listReports(req: any, clientId: string, opts?: { page?: number; pageSize?: number; status?: string; departmentId?: string; categoryId?: string; q?: string }) {
     const page = Math.max(opts?.page || 1, 1);
     const pageSize = Math.min(Math.max(opts?.pageSize || 20, 1), 100);
     const skip = (page - 1) * pageSize;
@@ -305,6 +379,16 @@ export class ReportService {
       const q = opts.q.trim();
       if (q) where.OR = [{ title: { contains: q, mode: 'insensitive' } }, { summary: { contains: q, mode: 'insensitive' } }];
     }
+    // Visibilità: AGENT senza canViewAllCases vede solo propri o unassigned
+    const userId = req?.user?.sub as string | undefined;
+    const userRole = ((req?.user?.role as string) || 'ADMIN').toUpperCase();
+    const tenant = req?.user?.clientId as string | undefined;
+    const canViewAll = (userId && tenant) ? this.canViewAllSync(tenant, userId) : true;
+
+    if (userRole === 'AGENT' && !canViewAll && userId) {
+      where.OR = [{ internalUserId: userId }, { internalUserId: null }];
+    }
+
     return this.prisma.whistleReport.findMany({
       where,
       include: {
@@ -322,6 +406,58 @@ export class ReportService {
       skip,
       take: pageSize,
     });
+  }
+
+  // Sync helper: best-effort read of canViewAllCases (avoid second query path complexities here)
+  private canViewAllCache = new Map<string, { v: boolean; t: number }>();
+  private canViewAllSync(tenantId: string, userId: string): boolean {
+    const key = `${tenantId}:${userId}`;
+    const hit = this.canViewAllCache.get(key);
+    const now = Date.now();
+    if (hit && now - hit.t < 10_000) return hit.v; // 10s cache
+    // Fire and forget update of cache; return conservative true by default to avoid over-restricting
+    (async () => {
+      try {
+        const u = await this.prisma.internalUser.findUnique({ where: { id: userId }, select: { canViewAllCases: true } });
+        this.canViewAllCache.set(key, { v: !!u?.canViewAllCases, t: Date.now() });
+      } catch {}
+    })();
+    return !!hit?.v;
+  }
+
+  // Helpers permessi/visibilità
+  private isTrue(v?: string) { return v === '1' || (v || '').toLowerCase() === 'true'; }
+
+  private async ensureCanView(req: any, reportId: string, tenantId: string) {
+    const userId = req?.user?.sub as string | undefined;
+    if (!userId) throw new BadRequestException('Tenant non valido');
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { internalUserId: true } });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+    if (report.internalUserId && report.internalUserId !== userId) {
+      const viewer = await this.prisma.internalUser.findUnique({ where: { id: userId }, select: { canViewAllCases: true } });
+      if (!viewer?.canViewAllCases) throw new ForbiddenException('Operazione non consentita');
+    }
+  }
+
+  private async ensureCanOperate(req: any, reportId: string, tenantId: string) {
+    const userId = req?.user?.sub as string | undefined;
+    const role = ((req?.user?.role as string) || 'ADMIN').toUpperCase();
+    if (!userId) throw new BadRequestException('Tenant non valido');
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { internalUserId: true } });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+
+    const canAdminsBypass = this.isTrue(process.env.CAN_ADMINS_BYPASS_ASSIGNMENT || 'true'); // default true
+    const reqOpsAgent = this.isTrue(process.env.REQUIRE_ASSIGNMENT_FOR_OPS_AGENT || 'true'); // default true
+    const reqOpsAdmin = this.isTrue(process.env.REQUIRE_ASSIGNMENT_FOR_OPS_ADMIN || 'false'); // default false
+
+    if (report.internalUserId === userId) return; // assegnatario
+    if (role === 'ADMIN' && canAdminsBypass && !reqOpsAdmin) return; // admin bypass
+
+    // Se non assegnato e agent: richiedi claim esplicito
+    if (!report.internalUserId && role === 'AGENT' && reqOpsAgent) {
+      throw new ForbiddenException('Requiere assegnazione (usa /assign/me)');
+    }
+    throw new ForbiddenException('Operazione non consentita');
   }
 
   /**
@@ -352,6 +488,7 @@ export class ReportService {
     // Scoping report
     const report = await this.prisma.whistleReport.findFirst({ where: { id: dto.reportId, clientId: tenantId }, select: { id: true } });
     if (!report) throw new NotFoundException('Risorsa non trovata');
+    await this.ensureCanOperate(req, dto.reportId, tenantId);
 
     const vis = ((dto.visibility || 'INTERNAL').toUpperCase()) as 'PUBLIC' | 'INTERNAL';
     if (vis !== 'PUBLIC' && vis !== 'INTERNAL') {
@@ -384,6 +521,7 @@ export class ReportService {
     // Scoping report
     const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { id: true } });
     if (!report) throw new NotFoundException('Risorsa interna non trovata');
+    await this.ensureCanView(req, reportId, tenantId);
 
     let filter: any = { reportId, clientId: tenantId };
     if (visibility && visibility.toUpperCase() !== 'ALL') {
@@ -406,6 +544,7 @@ export class ReportService {
       where: { id: reportId, clientId: tokenClientId },
     });
     if (!report) throw new NotFoundException('Segnalazione non trovata');
+    await this.ensureCanOperate(req, reportId, tokenClientId);
 
     const now = new Date();
     const newStatus = dto.status as ReportStatus;
@@ -475,6 +614,7 @@ export class ReportService {
 async updateMessageNoteTenant(req: any, reportId: string, messageId: string, note: string) {
   const tenantId = req?.user?.clientId as string | undefined;
   if (!tenantId) throw new BadRequestException('Tenant non valido');
+  await this.ensureCanOperate(req, reportId, tenantId);
   const message = await this.prisma.reportMessage.findFirst({ where: { id: messageId, reportId, clientId: tenantId } });
   if (!message) throw new NotFoundException('Messaggio non trovato');
   if ((message as any).visibility !== 'INTERNAL') throw new ForbiddenException('Non è consentito modificare questo messaggio');
@@ -490,6 +630,7 @@ async updateMessageNoteTenant(req: any, reportId: string, messageId: string, not
 async updateMessageBodyTenant(req: any, reportId: string, messageId: string, body: string) {
   const tenantId = req?.user?.clientId as string | undefined;
   if (!tenantId) throw new BadRequestException('Tenant non valido');
+  await this.ensureCanOperate(req, reportId, tenantId);
   const message = await this.prisma.reportMessage.findFirst({ where: { id: messageId, reportId, clientId: tenantId } });
   if (!message) throw new NotFoundException('Messaggio non trovato');
   if ((message as any).visibility !== 'INTERNAL') throw new ForbiddenException('Non è consentito modificare questo messaggio');
@@ -512,6 +653,7 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
       console.warn('deleteReport forbidden: tenant mismatch');
       throw new ForbiddenException('Operazione non consentita');
     }
+    await this.ensureCanOperate(req, reportId, tokenClientId);
 
     await this.prisma.reportMessage.deleteMany({ where: { reportId } });
     await this.prisma.publicUser.deleteMany({ where: { reportId } });
@@ -558,6 +700,42 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
     });
 
     return { message: 'Richiesta chiarimenti inviata', status: 'NEED_INFO', publicMessageId: pub.id };
+  }
+
+  // Assegnazioni
+  async assignMe(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+    const updated = await this.prisma.whistleReport.updateMany({ where: { id: reportId, clientId: tenantId, internalUserId: null }, data: { internalUserId: userId, assignedAt: new Date() } });
+    if (updated.count !== 1) {
+      const current = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { internalUserId: true } });
+      if (current?.internalUserId === userId) {
+        return { message: 'ASSIGNED', reportId };
+      }
+      throw new ConflictException({ message: 'ALREADY_ASSIGNED', assignedTo: current?.internalUserId });
+    }
+    await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: 'Caso assegnato a se stessi', note: 'CASE_ASSIGNED', visibility: 'SYSTEM' as any } });
+    return { message: 'ASSIGNED', reportId };
+  }
+
+  async assignTo(req: any, reportId: string, userId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+    // ensure target exists and belongs to tenant
+    const target = await this.prisma.internalUser.findFirst({ where: { id: userId, clientId: tenantId }, select: { id: true } });
+    if (!target) throw new NotFoundException('Utente target non trovato');
+    await this.prisma.whistleReport.update({ where: { id: reportId }, data: { internalUserId: userId, assignedAt: new Date() } });
+    await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: `Caso assegnato a utente ${userId}`, note: 'CASE_ASSIGNED', visibility: 'SYSTEM' as any } });
+    return { message: 'ASSIGNED', reportId, userId };
+  }
+
+  async unassign(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+    await this.prisma.whistleReport.update({ where: { id: reportId }, data: { internalUserId: null } });
+    await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: 'Caso rimosso dall\'assegnazione', note: 'CASE_UNASSIGNED', visibility: 'SYSTEM' as any } });
+    return { message: 'UNASSIGNED', reportId };
   }
 
   /**
@@ -668,3 +846,10 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
 
 
  
+
+
+
+
+
+
+
