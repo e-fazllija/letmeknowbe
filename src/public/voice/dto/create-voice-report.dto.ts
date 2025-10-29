@@ -35,10 +35,11 @@ export class CreateVoiceReportDto {
   @IsString()
   description?: string;
 
-  @ApiProperty({ description: 'Almeno un allegato audio via presign', type: [PublicAttachmentDto] })
+  @ApiProperty({ description: 'Allegati audio via presign', type: [PublicAttachmentDto], required: false })
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => PublicAttachmentDto)
-  attachments!: PublicAttachmentDto[];
+  attachments?: PublicAttachmentDto[];
 }
 
