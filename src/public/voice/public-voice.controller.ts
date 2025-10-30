@@ -40,7 +40,7 @@ export class PublicVoiceController {
       type: 'object',
       properties: {
         audio_file: { type: 'string', format: 'binary', description: 'File audio (webm/ogg/wav/mp3)' },
-        modelName: { type: 'string', example: 'turbo' },
+        modelName: { type: 'string', example: 'large' },
       },
       required: ['audio_file'],
     },
