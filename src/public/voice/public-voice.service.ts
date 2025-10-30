@@ -5,7 +5,6 @@ import { CreateVoiceReportDto } from './dto/create-voice-report.dto';
 import { Request } from 'express';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
-import { TranscribeRequestDto } from './dto/transcribe-request.dto';
 
 const AUDIO_MIME = new Set(['audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg']);
 const EXT_FOR_MIME: Record<string, string[]> = {
@@ -256,31 +255,7 @@ export class PublicVoiceService {
     return { reportId: report.id, publicCode: publicCode.toUpperCase(), secret: secretRaw, createdAt: report.createdAt };
   }
 
-  async transcribe(tenantId: string, dto: TranscribeRequestDto): Promise<{ text: string; attachment?: { fileName: string; mimeType: string; sizeBytes: number; storageKey: string; proof?: string } }> {
-    const storageKey = (dto.storageKey || '').trim();
-    if (!storageKey || !storageKey.startsWith(`${tenantId}/`)) throw new BadRequestException('storageKey non valido');
-
-    const bucketTmp = process.env.S3_BUCKET_TMP || '';
-    const bucketAttach = process.env.S3_BUCKET_ATTACH || '';
-    const isFinal = storageKey.includes('/att/');
-    const bucket = isFinal ? bucketAttach : bucketTmp;
-
-    const stream = await this.storage.getObjectStream(bucket, storageKey);
-    if (!stream) throw new NotFoundException('Oggetto non trovato in storage');
-
-    const buffer = await this.streamToBuffer(stream as any);
-    const fileName = storageKey.split('/').pop() || 'audio';
-    const model = (dto.modelName || process.env.WHISPER_MODEL || '').trim();
-    const text = await this.whisperCall(buffer, fileName, 'application/octet-stream', model);
-    if (dto.includeAudio) {
-      const ext = getExt(fileName) || getExt(storageKey);
-      const mime = guessMimeFromExt(ext) || 'audio/mpeg';
-      const proofSecret = process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
-      const proof = hmacSha256Hex(proofSecret, storageKey);
-      return { text, attachment: { fileName, mimeType: mime, sizeBytes: buffer.length, storageKey, proof } };
-    }
-    return { text };
-  }
+  // StorageKey-based transcription removed: endpoint now accepts only file upload
 
   async transcribeFromUpload(tenantId: string, file: any, modelName?: string): Promise<{ text: string }> {
     if (!file || !file.buffer) throw new BadRequestException('File mancante');
@@ -292,73 +267,89 @@ export class PublicVoiceService {
     return { text };
   }
 
-  async transcribeGateway(tenantId: string, file: any, body: any): Promise<{ text: string; attachment?: { fileName: string; mimeType: string; sizeBytes: number; storageKey: string; proof?: string }; attachedToReportId?: string }> {
+  async transcribeGateway(tenantId: string, file: any, body: any): Promise<{ text: string }> {
     const model = ((body?.modelName as string) || process.env.WHISPER_MODEL || '').trim();
-    const includeAudio = isTrue(body?.includeAudio) || false;
+    if (!file || !file.buffer) throw new BadRequestException('Fornire un file audio');
+    const mime = (file.mimetype || '').toLowerCase();
+    if (!AUDIO_MIME.has(mime as any)) throw new BadRequestException('Tipo audio non consentito');
+    const name = file.originalname || 'audio';
+    const text = await this.whisperCall(file.buffer, name, mime, model);
+    return { text };
+  }
 
-    let text = '';
-    let attachment: { fileName: string; mimeType: string; sizeBytes: number; storageKey: string; proof?: string } | undefined;
+  async uploadAudioAttachment(
+    tenantId: string,
+    file: any,
+    reportId: string,
+    secret: string,
+  ): Promise<{ attachmentId: string; reportId: string; fileName: string; mimeType: string; sizeBytes: number; storageKey: string; status: string }>
+  {
+    if (!file || !file.buffer) throw new BadRequestException('File mancante');
+    const mime = (file.mimetype || '').toLowerCase();
+    if (!AUDIO_MIME.has(mime as any)) throw new BadRequestException('Tipo audio non consentito');
+    const name = (file.originalname || 'audio').toString();
+    const ext = getExt(name);
+    const allowedExt = EXT_FOR_MIME[mime] || [];
+    if (!allowedExt.includes(ext)) throw new BadRequestException('Estensione incoerente con MIME');
 
-    if (file && file.buffer) {
-      const mime = (file.mimetype || '').toLowerCase();
-      if (!AUDIO_MIME.has(mime as any)) throw new BadRequestException('Tipo audio non consentito');
-      const name = file.originalname || 'audio';
-      text = await this.whisperCall(file.buffer, name, mime, model);
-      if (includeAudio) {
-        const bucket = process.env.S3_BUCKET_TMP || '';
-        const sseMode = ((process.env.S3_SSE_MODE || 'S3').toUpperCase() as any) || 'S3';
-        const kmsKeyId = process.env.S3_KMS_KEY_ID || undefined;
-        const id = (crypto as any).randomUUID ? (crypto as any).randomUUID() : crypto.randomBytes(16).toString('hex');
-        const extFromName = getExt(name);
-        const extFromMime = (EXT_FOR_MIME[mime]?.[0] || '');
-        const ext = extFromName || extFromMime || '';
-        const storageKey = `${tenantId}/tmp/${id}${ext}`;
-        const presigned = await this.storage.presignPut({ bucket, key: storageKey, contentType: mime || 'application/octet-stream', expiresInSeconds: 300, sseMode, kmsKeyId });
-        const fetchAny = (globalThis as any).fetch as typeof fetch;
-        if (!fetchAny) throw new NotImplementedException('Runtime fetch non disponibile');
-        const putRes = await fetchAny(presigned.uploadUrl, { method: 'PUT', headers: presigned.headers, body: file.buffer as any });
-        if (!putRes.ok) {
-          const t = await putRes.text().catch(() => '');
-          throw new BadRequestException(`Upload allegato fallito: ${putRes.status} ${t?.slice(0,200)}`);
-        }
-        const proofSecret = process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
-        const proof = hmacSha256Hex(proofSecret, storageKey);
-        attachment = { fileName: name, mimeType: mime, sizeBytes: file.size || file.buffer.length, storageKey, proof };
-      }
-    } else if ((body?.storageKey as string)?.trim()) {
-      const dto: TranscribeRequestDto = {
-        storageKey: (body.storageKey as string).trim(),
-        modelName: model || undefined,
-        includeAudio,
-      } as any;
-      const res = await this.transcribe(tenantId, dto);
-      text = res.text;
-      attachment = res.attachment;
-    } else {
-      throw new BadRequestException('Fornire un file audio o una storageKey');
+    const maxFileBytes = toBytes(parseInt(process.env.ATTACH_MAX_FILE_MB || '10', 10));
+    const size = typeof file.size === 'number' ? file.size : (file.buffer?.length || 0);
+    if (size <= 0) throw new BadRequestException('File vuoto');
+    if (size > maxFileBytes) throw new PayloadTooLargeException('File oltre il limite');
+
+    if (!reportId || !reportId.trim()) throw new BadRequestException('reportId mancante');
+    if (!secret || !secret.trim()) throw new BadRequestException('secret mancante');
+
+    const tokenSha = crypto.createHash('sha256').update(secret).digest('hex');
+    const pubUser = await this.prisma.publicUser.findFirst({
+      where: { clientId: tenantId, token: tokenSha, reportId: reportId.trim() },
+      select: { id: true },
+    });
+    if (!pubUser) throw new NotFoundException('Report o credenziali non valide');
+
+    const bucket = process.env.S3_BUCKET_TMP || '';
+    const sseMode = ((process.env.S3_SSE_MODE || 'S3').toUpperCase() as any) || 'S3';
+    const kmsKeyId = process.env.S3_KMS_KEY_ID || undefined;
+    const id = (crypto as any).randomUUID ? (crypto as any).randomUUID() : crypto.randomBytes(16).toString('hex');
+    const storageKey = `${tenantId}/tmp/${id}${ext}`;
+
+    const presigned = await this.storage.presignPut({
+      bucket,
+      key: storageKey,
+      contentType: mime || 'application/octet-stream',
+      expiresInSeconds: 300,
+      sseMode,
+      kmsKeyId,
+    });
+
+    const fetchAny = (globalThis as any).fetch as typeof fetch;
+    if (!fetchAny) throw new NotImplementedException('Runtime fetch non disponibile');
+    const putRes = await fetchAny(presigned.uploadUrl, { method: 'PUT', headers: presigned.headers, body: file.buffer as any });
+    if (!putRes.ok) {
+      const t = await putRes.text().catch(() => '');
+      throw new BadRequestException(`Upload allegato fallito: ${putRes.status} ${t?.slice(0,200)}`);
     }
 
-    // Se richiesto, allega direttamente al report esistente (protetto da secret)
-    const reportId = (body?.reportId as string)?.trim();
-    const secret = (body?.secret as string) || '';
-    if (includeAudio && attachment && reportId) {
-      if (!secret) throw new BadRequestException('Secret richiesto per allegare al report');
-      const tokenSha = crypto.createHash('sha256').update(secret).digest('hex');
-      const user = await this.prisma.publicUser.findFirst({ where: { clientId: tenantId, token: tokenSha, reportId }, select: { id: true } });
-      if (!user) throw new NotFoundException('Report o credenziali non valide');
-      await this.prisma.reportAttachment.create({
-        data: {
-          reportId,
-          fileName: attachment.fileName,
-          mimeType: attachment.mimeType,
-          sizeBytes: attachment.sizeBytes,
-          storageKey: attachment.storageKey,
-        },
-      } as any);
-      return { text, attachment, attachedToReportId: reportId };
-    }
+    const att = await this.prisma.reportAttachment.create({
+      data: {
+        reportId: reportId.trim(),
+        fileName: name,
+        mimeType: mime,
+        sizeBytes: size,
+        storageKey,
+      },
+      select: { id: true, status: true },
+    } as any);
 
-    return { text, attachment };
+    return {
+      attachmentId: att.id,
+      reportId: reportId.trim(),
+      fileName: name,
+      mimeType: mime,
+      sizeBytes: size,
+      storageKey,
+      status: (att as any).status || 'UPLOADED',
+    };
   }
 
   private async whisperCall(buffer: Buffer, fileName: string, contentType?: string, modelName?: string): Promise<string> {
