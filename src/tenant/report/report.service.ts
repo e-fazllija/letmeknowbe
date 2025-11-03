@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, ForbiddenException, NotImplementedException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, ForbiddenException, NotImplementedException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaTenantService } from '../prisma-tenant.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { CreateReportMessageDto } from './dto/create-report-message.dto';
@@ -9,6 +9,7 @@ import * as bcrypt from 'bcryptjs';
 import { Request } from 'express';
 import { RequestInfoDto } from './dto/request-info.dto';
 import { VoiceTranscriptDto } from './dto/voice-transcript.dto';
+import { decryptPII, encryptPII, parseKeyFromEnv } from '../../common/security/pii-crypto';
 
 // Helper locale: aggiunge giorni a una data
 function addDays(base: Date, days: number): Date {
@@ -143,7 +144,21 @@ export class ReportService {
         await (this.prisma as any).reportAccessLog.create({ data: { reportId, userId, clientId: tenantId, action: 'VIEW', ip: ip || undefined, ua } });
       }
     } catch {}
-    return report;
+    // Decrypt reporterName for backoffice and avoid leaking encrypted blob
+    try {
+      const enc = (report as any)?.reporterNameEnc as string | undefined;
+      if (enc) {
+        const key = parseKeyFromEnv('REPORTER_DATA_ENC_KEY');
+        const repId = ((report as any)?.id as string) || '';
+        const name = decryptPII(enc, key, `${tenantId}:${repId}`);
+        const out: any = { ...(report as any), reporterName: name };
+        delete out.reporterNameEnc;
+        return out;
+      }
+    } catch {}
+    const out: any = { ...(report as any) };
+    delete out.reporterNameEnc;
+    return out;
   }
 
   /**
@@ -161,6 +176,13 @@ export class ReportService {
     const date = (body?.date as string) || new Date().toISOString();
     const source = (body?.source as string) || (body?.channel as string) || 'WEB';
     const privacy = ((body?.privacy as string) || 'ANONIMO').toUpperCase();
+    const reporterNameRaw = body?.reporterName ? String(body.reporterName).trim() : '';
+    if (privacy === 'ANONIMO' && reporterNameRaw) {
+      throw new BadRequestException('Nominativo non consentito per segnalazione anonima');
+    }
+    if (privacy === 'CONFIDENZIALE' && !reporterNameRaw) {
+      throw new BadRequestException('Nominativo obbligatorio per segnalazione confidenziale');
+    }
     const departmentId = body?.departmentId as string | undefined;
     const categoryId = body?.categoryId as string | undefined;
     const attachments = Array.isArray(body?.attachments) ? body.attachments : [];
@@ -282,6 +304,12 @@ export class ReportService {
               acknowledgeAt: now,
             },
           });
+          if (privacy === 'CONFIDENZIALE' && reporterNameRaw) {
+            let key: Buffer;
+            try { key = parseKeyFromEnv('REPORTER_DATA_ENC_KEY'); } catch { throw new InternalServerErrorException('Configurazione cifratura mancante'); }
+            const enc = encryptPII(reporterNameRaw, key, `${tenantId}:${r.id}`);
+            await tx.whistleReport.update({ where: { id: r.id }, data: { reporterNameEnc: enc } });
+          }
           await tx.publicUser.create({ data: { clientId: tenantId, token: tokenSha, reportId: r.id } });
           if (attachments.length > 0) {
             await tx.reportAttachment.createMany({

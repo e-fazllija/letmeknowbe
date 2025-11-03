@@ -42,6 +42,12 @@ export class CreatePublicReportDto {
   @MaxLength(10000)
   description!: string;
 
+  @ApiProperty({ description: 'Nominativo (solo se privacy=CONFIDENZIALE)', required: false, example: 'Mario Rossi' })
+  @IsOptional()
+  @IsString()
+  @Length(1, 160)
+  reporterName?: string;
+
   @ApiProperty({ description: 'Allegati caricati via presign', required: false, type: [PublicAttachmentDto] })
   @IsOptional()
   @IsArray()

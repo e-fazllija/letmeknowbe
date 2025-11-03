@@ -35,6 +35,12 @@ export class CreateVoiceReportDto {
   @IsString()
   description?: string;
 
+  @ApiProperty({ description: 'Nominativo (solo se privacy=CONFIDENZIALE)', required: false, example: 'Mario Rossi' })
+  @IsOptional()
+  @IsString()
+  @Length(1, 160)
+  reporterName?: string;
+
   @ApiProperty({ description: 'Allegati audio via presign', type: [PublicAttachmentDto], required: false })
   @IsOptional()
   @IsArray()

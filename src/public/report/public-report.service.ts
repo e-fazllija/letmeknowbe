@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, NotImplementedException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, NotImplementedException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaTenantService } from '../../tenant/prisma-tenant.service';
 import { S3StorageService } from '../../storage/s3-storage.service';
 import { CreatePublicReportDto } from './dto/create-public-report.dto';
@@ -7,6 +7,7 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PublicReplyDto } from './dto/public-reply.dto';
 import { AttachmentsFinalizeDto } from './dto/attachments-finalize.dto';
+import { encryptPII, parseKeyFromEnv } from '../../common/security/pii-crypto';
 import { NotificationsService } from '../../common/notifications/notifications.service';
 
 const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain']);
@@ -265,6 +266,13 @@ export class PublicReportService {
     const channel = mapSource(dto.source);
     const eventDate = new Date(dto.date);
     const privacy = (dto.privacy || 'ANONIMO').toUpperCase();
+    const reporterNameRaw = (dto as any).reporterName ? String((dto as any).reporterName).trim() : '';
+    if (privacy === 'ANONIMO' && reporterNameRaw) {
+      throw new BadRequestException('Nominativo non consentito per segnalazione anonima');
+    }
+    if (privacy === 'CONFIDENZIALE' && !reporterNameRaw) {
+      throw new BadRequestException('Nominativo obbligatorio per segnalazione confidenziale');
+    }
     const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || (req.socket?.remoteAddress || '');
     const ipPepper = process.env.IP_HASH_PEPPER || 'dev_ip_pepper';
     const ipHash = ip ? hmacSha256Hex(ipPepper, ip) : undefined;
@@ -296,6 +304,13 @@ export class PublicReportService {
             },
           });
           await tx.publicUser.create({ data: { clientId: tenantId, token: tokenSha, reportId: report.id } });
+          // Salvataggio nominativo cifrato (solo CONFIDENZIALE)
+          if (privacy === 'CONFIDENZIALE' && reporterNameRaw) {
+            let key: Buffer;
+            try { key = parseKeyFromEnv('REPORTER_DATA_ENC_KEY'); } catch { throw new InternalServerErrorException('Configurazione cifratura mancante'); }
+            const enc = encryptPII(reporterNameRaw, key, `${tenantId}:${report.id}`);
+            await tx.whistleReport.update({ where: { id: report.id }, data: { reporterNameEnc: enc } });
+          }
           if (attachments.length > 0) {
             await tx.reportAttachment.createMany({
               data: attachments.map((a) => ({

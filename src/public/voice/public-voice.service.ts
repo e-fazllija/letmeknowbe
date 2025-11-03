@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, NotImplementedException, PayloadTooLargeException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, NotImplementedException, PayloadTooLargeException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaTenantService } from '../../tenant/prisma-tenant.service';
 import { S3StorageService } from '../../storage/s3-storage.service';
 import { CreateVoiceReportDto } from './dto/create-voice-report.dto';
@@ -6,6 +6,7 @@ import { Request } from 'express';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { NotificationsService } from '../../common/notifications/notifications.service';
+import { encryptPII, parseKeyFromEnv } from '../../common/security/pii-crypto';
 
 const AUDIO_MIME = new Set(['audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg']);
 const EXT_FOR_MIME: Record<string, string[]> = {
@@ -157,6 +158,9 @@ export class PublicVoiceService {
     const now = new Date();
     const eventDate = new Date(dto.date);
     const privacy = (dto.privacy || 'ANONIMO').toUpperCase();
+    const reporterNameRaw = (dto as any).reporterName ? String((dto as any).reporterName).trim() : '';
+    if (privacy === 'ANONIMO' && reporterNameRaw) throw new BadRequestException('Nominativo non consentito per segnalazione anonima');
+    if (privacy === 'CONFIDENZIALE' && !reporterNameRaw) throw new BadRequestException('Nominativo obbligatorio per segnalazione confidenziale');
 
     const secretRaw = base64url(crypto.randomBytes(32));
     const pepper = process.env.REPORT_SECRET_PEPPER || 'dev_report_pepper';
@@ -199,6 +203,12 @@ export class PublicVoiceService {
             },
           });
           await tx.publicUser.create({ data: { clientId: tenantId, token: tokenSha, reportId: report.id } });
+          if (privacy === 'CONFIDENZIALE' && reporterNameRaw) {
+            let key: Buffer;
+            try { key = parseKeyFromEnv('REPORTER_DATA_ENC_KEY'); } catch { throw new InternalServerErrorException('Configurazione cifratura mancante'); }
+            const enc = encryptPII(reporterNameRaw, key, `${tenantId}:${report.id}`);
+            await tx.whistleReport.update({ where: { id: report.id }, data: { reporterNameEnc: enc } });
+          }
           if (attachments.length > 0) {
             await tx.reportAttachment.createMany({
               data: attachments.map((a) => ({

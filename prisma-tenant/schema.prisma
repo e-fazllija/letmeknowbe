@@ -234,9 +234,11 @@ model WhistleReport {
   privacy              ReporterPrivacy @default(ANONIMO)
   departmentId         String?
   categoryId           String?
-  containsPIISuspected Boolean         @default(false)
-  ipHash               String?         @db.VarChar(128)
-  ua                   String?
+    containsPIISuspected Boolean         @default(false)
+    // Nominativo segnalante (cifrato AES-GCM, solo per privacy=CONFIDENZIALE)
+    reporterNameEnc     String?
+    ipHash               String?         @db.VarChar(128)
+    ua                   String?
   retentionAt          DateTime?
 
   internalUserId String?
