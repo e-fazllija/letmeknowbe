@@ -5,6 +5,7 @@ import { CreateVoiceReportDto } from './dto/create-voice-report.dto';
 import { Request } from 'express';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
+import { NotificationsService } from '../../common/notifications/notifications.service';
 
 const AUDIO_MIME = new Set(['audio/mpeg', 'audio/wav', 'audio/webm', 'audio/ogg']);
 const EXT_FOR_MIME: Record<string, string[]> = {
@@ -41,7 +42,7 @@ function guessMimeFromExt(ext: string): string | undefined {
 
 @Injectable()
 export class PublicVoiceService {
-  constructor(private prisma: PrismaTenantService, private storage: S3StorageService) {}
+  constructor(private prisma: PrismaTenantService, private storage: S3StorageService, private notify: NotificationsService) {}
 
   async presign(tenantId: string, body?: any) {
     const presignEnabled = isTrue(process.env.PRESIGN_ENABLED);
@@ -250,6 +251,13 @@ export class PublicVoiceService {
       } catch {
         // ignore enqueue failure (non-bloccante)
       }
+    }
+
+    // Post-commit notification (best-effort)
+    try {
+      await this.notify.notifyNewPublicVoiceReport(tenantId, report.id);
+    } catch {
+      // ignore notification errors
     }
 
     return { reportId: report.id, publicCode: publicCode.toUpperCase(), secret: secretRaw, createdAt: report.createdAt };

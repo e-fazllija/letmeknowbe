@@ -198,6 +198,19 @@ Dettaglio con auto-ack
 - Scrive anche un messaggio `SYSTEM` (nota `SLA_ACK_ON_VIEW`). Chiamate successive sono idempotenti (non ricreano l'ack).
 
 SLA Reminder (opzionale)
+
+## Notifiche nuova segnalazione (manuale puro)
+
+- Flusso: nessuna auto-assegnazione su segnalazioni pubbliche; invia una notifica a tutti gli ADMIN attivi del tenant per assegnazione manuale.
+- Flag ENV:
+  - `AUTO_ASSIGN_MODE=NONE` (disabilita auto-claim su prima visualizzazione)
+  - `NOTIFY_ON_NEW_PUBLIC_REPORT=true` (report testuali)
+  - `NOTIFY_ON_NEW_PUBLIC_VOICE=true` (report vocali)
+  - `FRONTEND_BASE_URL=http://localhost:5173` (usato per costruire il link al caso)
+- SMTP (prod/dev):
+  - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+  - Se `SMTP_HOST` non è impostato, in dev usa driver “console” (logga il contenuto della mail)
+- Destinatari: tutti gli `InternalUser` con `role=ADMIN` e `status=ACTIVE` del tenant.
 - Abilita reminder con `SLA_REMINDER_ENABLED=true` (job giornaliero di default; override con `SLA_TIMER_MS`).
 - Configurazione:
   - `ACK_TTL_DAYS=7` (default) → ricezione (ricevuta) entro 7 giorni

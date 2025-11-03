@@ -7,6 +7,7 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { PublicReplyDto } from './dto/public-reply.dto';
 import { AttachmentsFinalizeDto } from './dto/attachments-finalize.dto';
+import { NotificationsService } from '../../common/notifications/notifications.service';
 
 const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain']);
 const EXT_FOR_MIME: Record<string, string[]> = {
@@ -49,7 +50,7 @@ function detectPii(text: string): boolean {
 
 @Injectable()
 export class PublicReportService {
-  constructor(private prisma: PrismaTenantService, private storage: S3StorageService) {}
+  constructor(private prisma: PrismaTenantService, private storage: S3StorageService, private notify: NotificationsService) {}
 
   private defaults() {
     return [
@@ -334,6 +335,13 @@ export class PublicReportService {
       }
     }
     if (!report) throw new BadRequestException('Impossibile creare la segnalazione, riprovare');
+
+    // Post-commit notification (best-effort)
+    try {
+      await this.notify.notifyNewPublicReport(tenantId, report.id);
+    } catch {
+      // ignore notification errors
+    }
 
     return { reportId: report.id, publicCode: publicCode.toUpperCase(), secret: secretRaw, createdAt: report.createdAt };
   }
