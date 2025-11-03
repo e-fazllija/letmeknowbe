@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, Req, Res, UseGuards, ForbiddenException } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, Req, Res, UseGuards, ForbiddenException, BadRequestException, NotImplementedException, NotFoundException } from '@nestjs/common';
 import { ReportService } from './report.service';
 // import { CreateReportDto } from './dto/create-report.dto';
 // import { CreateReportMessageDto } from './dto/create-report-message.dto';
@@ -13,12 +13,15 @@ import { RequestInfoDto } from './dto/request-info.dto';
 import { VoiceTranscriptDto } from './dto/voice-transcript.dto';
 import { Roles } from '../../common/guards/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { S3StorageService } from '../../storage/s3-storage.service';
+import { AttachmentsFinalizeDto } from '../../public/report/dto/attachments-finalize.dto';
+import * as crypto from 'crypto';
 
 @ApiTags('Tenant - Segnalazioni')
 @ApiBearerAuth('access-token')
 @Controller('tenant/reports')
 export class ReportController {
-  constructor(private readonly service: ReportService) {}
+  constructor(private readonly service: ReportService, private storage: S3StorageService) {}
 
   // CREA NUOVA SEGNALAZIONE (TENANT, BACKOFFICE)
   @Post()
@@ -49,6 +52,17 @@ export class ReportController {
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
   getDetail(@Req() req: Request, @Param('reportId') reportId: string) {
     return this.service.getDetailAndAck(req, reportId);
+  }
+
+  // ELENCO ALLEGATI DELLA SEGNALAZIONE
+  @Get(':reportId/attachments')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT', 'AUDITOR')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Elenco allegati (metadata) della segnalazione' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  listAttachments(@Req() req: Request, @Param('reportId') reportId: string) {
+    return this.service.listAttachments(req, reportId);
   }
 
   // ELENCO SEGNALAZIONI (PER CLIENT)
@@ -235,6 +249,118 @@ updateMessageBody(
   })
   requestInfo(@Req() req: Request, @Param('reportId') reportId: string, @Body() dto: RequestInfoDto) {
     return this.service.requestInfo(req, reportId, dto);
+  }
+
+  // TENANT: Presign allegati (backoffice)
+  @Post('attachments/presign')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Presign per upload allegati (backoffice, S3/MinIO)' })
+  @ApiBody({ schema: { type: 'object', properties: { files: { type: 'array', items: { type: 'object', properties: { fileName: { type: 'string' }, mimeType: { type: 'string' }, sizeBytes: { type: 'number' } } } } } } })
+  async presignTenant(@Req() req: Request, @Body() body?: any) {
+    const tenantId = (req as any)?.user?.clientId as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+    const presignEnabled = (process.env.PRESIGN_ENABLED || '').toLowerCase() === 'true' || process.env.PRESIGN_ENABLED === '1';
+    if (!presignEnabled) throw new NotImplementedException('Presign disabilitato');
+
+    const mode = (process.env.PRESIGN_MODE || '').toUpperCase();
+    const toBytes = (mb: number) => Math.floor(mb * 1024 * 1024);
+    const EXT_FOR_MIME: Record<string, string[]> = {
+      'image/png': ['.png'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'application/pdf': ['.pdf'],
+      'text/plain': ['.txt'],
+    };
+    const getExt = (name?: string) => {
+      if (!name) return '';
+      const i = name.lastIndexOf('.');
+      return i >= 0 ? name.substring(i).toLowerCase() : '';
+    };
+    const hmacSha256Hex = (key: string, data: string) => crypto.createHmac('sha256', key).update(data).digest('hex');
+
+    if (mode === 'MOCK') {
+      const maxFileBytes = toBytes(parseInt(process.env.ATTACH_MAX_FILE_MB || '10', 10));
+      const proofSecret = process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
+      const makeItem = (file?: { fileName?: string; mimeType?: string; sizeBytes?: number }) => {
+        const id = (crypto as any).randomUUID ? (crypto as any).randomUUID() : crypto.randomBytes(16).toString('hex');
+        const extFromName = file?.fileName ? getExt(file.fileName) : '';
+        const extFromMime = file?.mimeType ? (EXT_FOR_MIME[file.mimeType]?.[0] || '') : '';
+        const ext = extFromName || extFromMime || '';
+        const storageKey = `${tenantId}/tmp/${id}${ext}`;
+        const mime = file?.mimeType || 'application/octet-stream';
+        const proof = hmacSha256Hex(proofSecret, storageKey);
+        return { storageKey, method: 'PUT', uploadUrl: `https://example.invalid/upload/${encodeURIComponent(storageKey)}`, headers: { 'content-type': mime }, maxSizeBytes: maxFileBytes, expiresIn: 300, proof };
+      };
+      const items = Array.isArray(body?.files) && body.files.length > 0 ? body.files.map((f: any) => makeItem(f)) : [makeItem()];
+      return { items };
+    }
+
+    if (mode === 'REAL') {
+      const itemsInput: Array<{ fileName?: string; mimeType?: string; sizeBytes?: number }> = Array.isArray(body?.files) && body.files.length > 0 ? body.files : [{}];
+      const bucket = process.env.S3_BUCKET_TMP || '';
+      const sseMode = ((process.env.S3_SSE_MODE || 'S3').toUpperCase() as any) || 'S3';
+      const kmsKeyId = process.env.S3_KMS_KEY_ID || undefined;
+      const proofSecret = process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
+      const results: any[] = [];
+      for (const f of itemsInput) {
+        const id = (crypto as any).randomUUID ? (crypto as any).randomUUID() : crypto.randomBytes(16).toString('hex');
+        const extFromName = f?.fileName ? getExt(f.fileName) : '';
+        const extFromMime = f?.mimeType ? (EXT_FOR_MIME[f.mimeType]?.[0] || '') : '';
+        const ext = extFromName || extFromMime || '';
+        const storageKey = `${tenantId}/tmp/${id}${ext}`;
+        const presigned = await this.storage.presignPut({ bucket, key: storageKey, contentType: f?.mimeType || 'application/octet-stream', expiresInSeconds: 300, sseMode, kmsKeyId });
+        const proof = hmacSha256Hex(proofSecret, storageKey);
+        results.push({ storageKey, method: 'PUT', uploadUrl: presigned.uploadUrl, headers: presigned.headers, maxSizeBytes: toBytes(parseInt(process.env.ATTACH_MAX_FILE_MB || '10', 10)), expiresIn: presigned.expiresIn, proof });
+      }
+      return { items: results };
+    }
+
+    throw new NotImplementedException('Presign non implementato');
+  }
+
+  // TENANT: Finalize allegati (backoffice)
+  @Post('attachments/finalize')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Finalize upload allegati (backoffice): valida HMAC/ETag/size su TMP' })
+  @ApiBody({ type: AttachmentsFinalizeDto })
+  async finalizeTenant(@Req() req: Request, @Body() dto: AttachmentsFinalizeDto) {
+    const tenantId = (req as any)?.user?.clientId as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+    const items = Array.isArray(dto?.items) ? dto.items : [];
+    if (items.length === 0) throw new BadRequestException('Nessun elemento da finalizzare');
+
+    const bucketTmp = process.env.S3_BUCKET_TMP || '';
+    const finalizeSecret = process.env.UPLOAD_FINALIZE_SECRET || process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';
+
+    const accepted: any[] = [];
+    const rejected: any[] = [];
+    const hmacSha256Hex = (key: string, data: string) => crypto.createHmac('sha256', key).update(data).digest('hex');
+
+    for (const it of items) {
+      try {
+        if (!it.storageKey || !it.storageKey.startsWith(`${tenantId}/tmp/`)) throw new BadRequestException('storageKey non valido');
+        if (it.hmac) {
+          const expected = hmacSha256Hex(finalizeSecret, it.storageKey);
+          if (expected !== it.hmac) throw new BadRequestException('HMAC non valido');
+        }
+        const head = await this.storage.headObject(bucketTmp, it.storageKey);
+        if (!head) throw new NotFoundException('Oggetto non trovato');
+        if (typeof it.sizeBytes === 'number' && head.contentLength != null && head.contentLength !== it.sizeBytes) {
+          throw new BadRequestException('Dimensione non coerente');
+        }
+        if (it.etag && head.etag && head.etag.replace(/\"/g, '') !== it.etag.replace(/\"/g, '')) {
+          throw new BadRequestException('ETag non coerente');
+        }
+        accepted.push({ storageKey: it.storageKey, etag: head.etag, sizeBytes: head.contentLength ?? it.sizeBytes });
+      } catch (e: any) {
+        rejected.push({ storageKey: it.storageKey, reason: e?.message || 'invalid' });
+      }
+    }
+
+    return { accepted, rejected };
   }
 
   // TENANT: carica trascrizione manuale (nota INTERNAL)

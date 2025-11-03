@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, ForbiddenException, NotImplementedException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaTenantService } from '../prisma-tenant.service';
+import { NotificationsService } from '../../common/notifications/notifications.service';
 import { CreateReportDto } from './dto/create-report.dto';
 import { CreateReportMessageDto } from './dto/create-report-message.dto';
 import { CreateReportStatusDto } from './dto/create-report-status.dto';
@@ -20,7 +21,7 @@ function addDays(base: Date, days: number): Date {
 
 @Injectable()
 export class ReportService {
-  constructor(private prisma: PrismaTenantService) {}
+  constructor(private prisma: PrismaTenantService, private notify: NotificationsService) {}
 
   private readonly STATUS_DURATIONS = {
     OPEN: 7,
@@ -744,17 +745,20 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
       throw new ConflictException({ message: 'ALREADY_ASSIGNED', assignedTo: current?.internalUserId });
     }
     await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: 'Caso assegnato a se stessi', note: 'CASE_ASSIGNED', visibility: 'SYSTEM' as any } });
+    try { await this.notify.notifyAssignment(tenantId, reportId, userId!, { byUserId: userId! }); } catch {}
     return { message: 'ASSIGNED', reportId };
   }
 
   async assignTo(req: any, reportId: string, userId: string) {
     const tenantId = req?.user?.clientId as string | undefined;
+    const byUserId = req?.user?.sub as string | undefined;
     if (!tenantId) throw new BadRequestException('Tenant non valido');
     // ensure target exists and belongs to tenant
     const target = await this.prisma.internalUser.findFirst({ where: { id: userId, clientId: tenantId }, select: { id: true } });
     if (!target) throw new NotFoundException('Utente target non trovato');
     await this.prisma.whistleReport.update({ where: { id: reportId }, data: { internalUserId: userId, assignedAt: new Date() } });
     await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: `Caso assegnato a utente ${userId}`, note: 'CASE_ASSIGNED', visibility: 'SYSTEM' as any } });
+    try { await this.notify.notifyAssignment(tenantId, reportId, userId, { byUserId }); } catch {}
     return { message: 'ASSIGNED', reportId, userId };
   }
 
@@ -868,6 +872,35 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
 
     const filename = `report_${report.publicCode || report.id}.pdf`;
     return { buffer, filename };
+  }
+
+  /**
+   * Elenco allegati (metadata) della segnalazione con controllo visibilità
+   */
+  async listAttachments(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+
+    const report = await this.prisma.whistleReport.findFirst({
+      where: { id: reportId, clientId: tenantId },
+      select: { id: true, internalUserId: true },
+    });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+
+    if (report.internalUserId && userId && report.internalUserId !== userId) {
+      const viewer = await this.prisma.internalUser.findUnique({ where: { id: userId }, select: { canViewAllCases: true } });
+      if (!viewer?.canViewAllCases) {
+        throw new NotFoundException('Segnalazione non trovata');
+      }
+    }
+
+    const items = await this.prisma.reportAttachment.findMany({
+      where: { reportId },
+      select: { id: true, fileName: true, mimeType: true, sizeBytes: true, storageKey: true, status: true as any, etag: true, finalKey: true, scannedAt: true, virusName: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    } as any);
+    return items;
   }
 }
 

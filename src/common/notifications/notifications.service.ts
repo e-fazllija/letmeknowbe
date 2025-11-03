@@ -42,6 +42,19 @@ export class NotificationsService {
     }
   }
 
+  private async resolveUserEmail(tenantId: string, userId: string): Promise<string | undefined> {
+    try {
+      const u = await this.prisma.internalUser.findFirst({
+        where: { id: userId, clientId: tenantId, status: 'ACTIVE' as any, email: { contains: '@' } },
+        select: { email: true },
+      });
+      const mail = (u?.email || '').trim();
+      return mail || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async deliver(to: string[], subject: string, text: string, html?: string): Promise<void> {
     const host = (process.env.SMTP_HOST || '').trim();
     const portRaw = process.env.SMTP_PORT || '';
@@ -127,5 +140,30 @@ export class NotificationsService {
       link ? `Apri: ${link}` : 'Configura FRONTEND_BASE_URL per includere il link al caso.',
     ];
     await this.deliver(to, subject, textLines.join('\n'));
+  }
+
+  async notifyAssignment(tenantId: string, reportId: string, assigneeUserId: string, opts?: { byUserId?: string }): Promise<void> {
+    if (!isTrue(process.env.NOTIFY_ON_ASSIGN)) return;
+    const toEmail = await this.resolveUserEmail(tenantId, assigneeUserId);
+    if (!toEmail) return;
+    const tenantName = await this.resolveTenantName(tenantId);
+    const base = this.frontendBase();
+    const link = base ? `${base}/#/reports/${reportId}` : undefined;
+    let byLine = '';
+    try {
+      const byId = opts?.byUserId || '';
+      if (byId) {
+        const byEmail = await this.resolveUserEmail(tenantId, byId);
+        if (byEmail) byLine = `Assegnato da: ${byEmail}`;
+      }
+    } catch {}
+    const subject = `Caso assegnato — ${tenantName || tenantId}`;
+    const textLines = [
+      `Tenant: ${tenantName || tenantId}`,
+      `Report ID: ${reportId}`,
+      link ? `Apri: ${link}` : 'Configura FRONTEND_BASE_URL per includere il link al caso.',
+      byLine,
+    ].filter(Boolean) as string[];
+    await this.deliver([toEmail], subject, textLines.join('\n'));
   }
 }

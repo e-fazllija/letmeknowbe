@@ -9,10 +9,11 @@ import { ReportSlaScheduler } from './report-sla.scheduler';
 import { ReportTranscriptionScheduler } from './report-transcription.scheduler';
 import { AttachmentScanScheduler } from './attachment-scan.scheduler';
 import { StorageModule } from '../../storage/storage.module';
+import { NotificationsModule } from '../../common/notifications/notifications.module';
 import { RolesGuard } from '../../common/guards/roles.guard';
 
 @Module({
-  imports: [TenantModule, JwtModule.register({}), StorageModule],
+  imports: [TenantModule, JwtModule.register({}), StorageModule, NotificationsModule],
   controllers: [ReportController],
   providers: [ReportService, JwtAuthGuard, RolesGuard, ReportSlaScheduler, ReportTranscriptionScheduler, AttachmentScanScheduler],
   exports: [ReportService],
