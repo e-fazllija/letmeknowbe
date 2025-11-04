@@ -65,6 +65,49 @@ export class ReportController {
     return this.service.listAttachments(req, reportId);
   }
 
+  // DOWNLOAD allegato (stream via BE)
+  @Get(':reportId/attachments/:attachmentId/download')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT', 'AUDITOR')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Scarica un allegato (stream via backend)' })
+  @ApiParam({ name: 'reportId', description: 'ID del report' })
+  @ApiParam({ name: 'attachmentId', description: 'ID dell\'allegato' })
+  async downloadAttachment(@Req() req: Request, @Res() res: Response, @Param('reportId') reportId: string, @Param('attachmentId') attachmentId: string) {
+    const meta = await this.service.resolveAttachmentAccess(req, reportId, attachmentId);
+    const head = await this.storage.headObject(meta.bucket, meta.key);
+    const stream = await this.storage.getObjectStream(meta.bucket, meta.key);
+    if (!stream) {
+      // 404 quando l'oggetto non è disponibile
+      res.status(404).send('File non trovato');
+      return;
+    }
+    const safe = (name: string) => name.replace(/[/\\\r\n\t\0]/g, '_').replace(/\s+/g, ' ').trim().slice(0, 200) || 'file';
+    const fileName = safe(meta.fileName);
+    const encName = encodeURIComponent(fileName).replace(/\%20/g, '+');
+    res.setHeader('Content-Type', meta.mimeType || 'application/octet-stream');
+    if (head?.contentLength != null) res.setHeader('Content-Length', String(head.contentLength));
+    if (head?.etag) res.setHeader('ETag', head.etag);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"; filename*=UTF-8''${encName}`);
+    stream.on('error', () => { try { res.end(); } catch {} });
+    stream.pipe(res);
+  }
+
+  // PRESIGN GET (download diretto S3/MinIO)
+  @Post(':reportId/attachments/:attachmentId/presign')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT', 'AUDITOR')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Genera una URL firmata per scaricare un allegato' })
+  @ApiParam({ name: 'reportId', description: 'ID del report' })
+  @ApiParam({ name: 'attachmentId', description: 'ID dell\'allegato' })
+  async presignDownload(@Req() req: Request, @Param('reportId') reportId: string, @Param('attachmentId') attachmentId: string) {
+    const meta = await this.service.resolveAttachmentAccess(req, reportId, attachmentId);
+    const disposition = `attachment; filename="${(meta.fileName || 'file').replace(/["]+/g, '')}"`;
+    const out = await this.storage.presignGet({ bucket: meta.bucket, key: meta.key, expiresInSeconds: 300, responseContentType: meta.mimeType || 'application/octet-stream', responseContentDisposition: disposition });
+    return { url: out.url, expiresIn: out.expiresIn };
+  }
+
   // ELENCO SEGNALAZIONI (PER CLIENT)
   @Get()
   @ApiOperation({ summary: 'Elenco segnalazioni per cliente (admin/agent)', description: 'Parametro clientId opzionale: se assente viene usato quello del token JWT' })
@@ -271,6 +314,8 @@ updateMessageBody(
       'image/jpeg': ['.jpg', '.jpeg'],
       'application/pdf': ['.pdf'],
       'text/plain': ['.txt'],
+      'audio/mpeg': ['.mp3'],
+      'audio/wav': ['.wav'],
     };
     const getExt = (name?: string) => {
       if (!name) return '';

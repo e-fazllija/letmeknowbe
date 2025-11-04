@@ -19,6 +19,29 @@ export class S3StorageService implements StorageService {
     this.client = { __lazy__: true, region, endpoint, credentials } as any;
   }
 
+  async presignGet(params: { bucket: string; key: string; expiresInSeconds?: number; responseContentType?: string; responseContentDisposition?: string }): Promise<{ url: string; expiresIn: number }> {
+    const { bucket, key, expiresInSeconds = 300, responseContentType, responseContentDisposition } = params;
+    const { S3Client, GetObjectCommand } = await import('@aws-sdk/client-s3');
+    const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
+    if ((this.client as any).__lazy__) {
+      const c = new S3Client({
+        region: (this.client as any).region,
+        endpoint: (this.client as any).endpoint,
+        forcePathStyle: this.forcePathStyle,
+        credentials: (this.client as any).credentials,
+      });
+      this.client = c;
+    }
+    const cmd = new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      ResponseContentType: responseContentType,
+      ResponseContentDisposition: responseContentDisposition,
+    } as any);
+    const url = await getSignedUrl(this.client, cmd, { expiresIn: expiresInSeconds });
+    return { url, expiresIn: expiresInSeconds };
+  }
+
   async presignPut(params: PresignPutParams): Promise<PresignPutResult> {
     const { bucket, key, contentType, expiresInSeconds = 300, sseMode = 'S3', kmsKeyId } = params;
 

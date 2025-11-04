@@ -10,12 +10,14 @@ import { AttachmentsFinalizeDto } from './dto/attachments-finalize.dto';
 import { encryptPII, parseKeyFromEnv } from '../../common/security/pii-crypto';
 import { NotificationsService } from '../../common/notifications/notifications.service';
 
-const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain']);
+const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain', 'audio/mpeg', 'audio/wav']);
 const EXT_FOR_MIME: Record<string, string[]> = {
   'image/png': ['.png'],
   'image/jpeg': ['.jpg', '.jpeg'],
   'application/pdf': ['.pdf'],
   'text/plain': ['.txt'],
+  'audio/mpeg': ['.mp3'],
+  'audio/wav': ['.wav'],
 };
 
 function toBytes(mb: number) { return Math.floor(mb * 1024 * 1024); }
@@ -263,6 +265,10 @@ export class PublicReportService {
 
     // Public code with retry on conflict
     const now = new Date();
+    const retentionDaysEnv = parseInt(process.env.DATA_RETENTION_DAYS || '', 10);
+    const yearsEnv = parseInt(process.env.DATA_RETENTION_YEARS || '5', 10);
+    const retentionDays = !isNaN(retentionDaysEnv) && retentionDaysEnv > 0 ? retentionDaysEnv : ((isNaN(yearsEnv) || yearsEnv <= 0 ? 5 : yearsEnv) * 365);
+    const retentionAt = new Date(now.getTime() + retentionDays * 24 * 60 * 60 * 1000);
     const channel = mapSource(dto.source);
     const eventDate = new Date(dto.date);
     const privacy = (dto.privacy || 'ANONIMO').toUpperCase();
@@ -283,21 +289,22 @@ export class PublicReportService {
     for (let i = 0; i < 5; i++) {
       try {
         publicCode = normalizeCode();
-        const result = await this.prisma.$transaction(async (tx) => {
-          const report = await tx.whistleReport.create({
-            data: {
-              clientId: tenantId,
-              publicCode: publicCode,
-              secretHash: secretHash,
-              status: 'OPEN' as any,
-              title: dto.subject,
-              summary: dto.description,
-              createdAt: now,
-              channel: channel as any,
-              eventDate,
-              privacy: privacy as any,
-              departmentId: dto.departmentId,
-              categoryId: dto.categoryId,
+          const result = await this.prisma.$transaction(async (tx) => {
+            const report = await tx.whistleReport.create({
+              data: {
+                clientId: tenantId,
+                publicCode: publicCode,
+                secretHash: secretHash,
+                status: 'OPEN' as any,
+                title: dto.subject,
+                summary: dto.description,
+                createdAt: now,
+                retentionAt,
+                channel: channel as any,
+                eventDate,
+                privacy: privacy as any,
+                departmentId: dto.departmentId,
+                categoryId: dto.categoryId,
               containsPIISuspected: !!containsPII,
               ipHash,
               ua,

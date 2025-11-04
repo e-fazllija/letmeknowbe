@@ -210,12 +210,14 @@ export class ReportService {
     const maxFiles = parseInt(process.env.ATTACH_MAX_FILES || '3', 10);
     const maxFileBytes = toBytes(parseInt(process.env.ATTACH_MAX_FILE_MB || '10', 10));
     const maxTotalBytes = toBytes(parseInt(process.env.ATTACH_MAX_TOTAL_MB || '20', 10));
-    const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain']);
+    const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'application/pdf', 'text/plain', 'audio/mpeg', 'audio/wav']);
     const EXT_FOR_MIME: Record<string, string[]> = {
       'image/png': ['.png'],
       'image/jpeg': ['.jpg', '.jpeg'],
       'application/pdf': ['.pdf'],
       'text/plain': ['.txt'],
+      'audio/mpeg': ['.mp3'],
+      'audio/wav': ['.wav'],
     };
     const getExt = (name: string) => {
       const i = name.lastIndexOf('.');
@@ -278,6 +280,10 @@ export class ReportService {
 
     let report: any;
     let publicCode = '';
+    const retentionDaysEnv = parseInt(process.env.DATA_RETENTION_DAYS || '', 10);
+    const yearsEnv = parseInt(process.env.DATA_RETENTION_YEARS || '5', 10);
+    const retentionDays = !isNaN(retentionDaysEnv) && retentionDaysEnv > 0 ? retentionDaysEnv : ((isNaN(yearsEnv) || yearsEnv <= 0 ? 5 : yearsEnv) * 365);
+    const retentionAt = new Date(now.getTime() + retentionDays * 24 * 60 * 60 * 1000);
     for (let i = 0; i < 5; i++) {
       try {
         publicCode = normalizeCode();
@@ -291,6 +297,7 @@ export class ReportService {
               title: subject,
               summary: description,
               createdAt: now,
+              retentionAt,
               channel: channel as any,
               eventDate,
               privacy: privacy as any,
@@ -901,6 +908,58 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
       orderBy: { createdAt: 'asc' },
     } as any);
     return items;
+  }
+
+  /**
+   * Resolve bucket/key and metadata for an attachment ensuring access rules.
+   */
+  async resolveAttachmentAccess(req: any, reportId: string, attachmentId: string): Promise<{
+    bucket: string;
+    key: string;
+    fileName: string;
+    mimeType?: string;
+    sizeBytes?: number;
+    status?: string;
+  }>
+  {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+
+    const report = await this.prisma.whistleReport.findFirst({
+      where: { id: reportId, clientId: tenantId },
+      select: { id: true, internalUserId: true },
+    });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+    if (report.internalUserId && userId && report.internalUserId !== userId) {
+      const viewer = await this.prisma.internalUser.findUnique({ where: { id: userId }, select: { canViewAllCases: true } });
+      if (!viewer?.canViewAllCases) throw new NotFoundException('Segnalazione non trovata');
+    }
+
+    const att = await this.prisma.reportAttachment.findFirst({
+      where: { id: attachmentId, reportId },
+      select: { id: true, fileName: true, mimeType: true, sizeBytes: true, storageKey: true, finalKey: true, status: true as any },
+    } as any);
+    if (!att) throw new NotFoundException('Allegato non trovato');
+
+    const allowUnscanned = (process.env.ALLOW_UNSCANNED_DOWNLOAD || 'true').toLowerCase() === 'true' || process.env.ALLOW_UNSCANNED_DOWNLOAD === '1';
+    const status = String((att as any).status || 'UPLOADED').toUpperCase();
+    if (!allowUnscanned && status !== 'CLEAN') {
+      throw new ForbiddenException('Allegato non disponibile (non ancora verificato)');
+    }
+    if (status === 'INFECTED') {
+      throw new ForbiddenException('Allegato infetto');
+    }
+
+    const bucketTmp = process.env.S3_BUCKET_TMP || '';
+    const bucketAttach = process.env.S3_BUCKET_ATTACH || '';
+
+    const useAttach = status === 'CLEAN' && !!att.finalKey;
+    const bucket = useAttach ? bucketAttach : bucketTmp;
+    const key = (useAttach ? att.finalKey : att.storageKey) as string;
+    if (!bucket || !key) throw new NotFoundException('Oggetto non disponibile');
+
+    return { bucket, key, fileName: att.fileName, mimeType: att.mimeType || undefined, sizeBytes: att.sizeBytes || undefined, status };
   }
 }
 

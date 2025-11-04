@@ -8,6 +8,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ReportSlaScheduler } from './report-sla.scheduler';
 import { ReportTranscriptionScheduler } from './report-transcription.scheduler';
 import { AttachmentScanScheduler } from './attachment-scan.scheduler';
+import { ReportRetentionScheduler } from './report-retention.scheduler';
 import { StorageModule } from '../../storage/storage.module';
 import { NotificationsModule } from '../../common/notifications/notifications.module';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -15,7 +16,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 @Module({
   imports: [TenantModule, JwtModule.register({}), StorageModule, NotificationsModule],
   controllers: [ReportController],
-  providers: [ReportService, JwtAuthGuard, RolesGuard, ReportSlaScheduler, ReportTranscriptionScheduler, AttachmentScanScheduler],
+  providers: [ReportService, JwtAuthGuard, RolesGuard, ReportSlaScheduler, ReportTranscriptionScheduler, AttachmentScanScheduler, ReportRetentionScheduler],
   exports: [ReportService],
 })
 export class ReportModule {}
