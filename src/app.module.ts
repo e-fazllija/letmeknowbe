@@ -21,9 +21,25 @@ import { TemplatesModule } from './tenant/templates/templates.module';
 import { BillingModule } from './tenant/billing/billing.module';
 import { RateLimitFilter } from './common/filters/rate-limit.filter';
 
+const nodeEnv = (process.env.NODE_ENV || 'development').toLowerCase();
+const envFilePath = (
+  (): string[] => {
+    const files: string[] = [];
+    // Non-standard convenience files first (highest precedence)
+    if (nodeEnv === 'production') files.push('.env.prod');
+    if (nodeEnv === 'development') files.push('.env.dev');
+    // Standard dotenv-flow style
+    files.push(`.env.${nodeEnv}.local`);
+    files.push(`.env.${nodeEnv}`);
+    files.push('.env.local');
+    files.push('.env');
+    return files;
+  }
+)();
+
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, validationSchema }),
+    ConfigModule.forRoot({ isGlobal: true, envFilePath, validationSchema }),
     ThrottlerModule.forRoot([
       {
         ttl: 60,

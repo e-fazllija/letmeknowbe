@@ -44,14 +44,87 @@ export class UserService {
     return updated;
   }
 
-  async softRemoveByClient(clientId: string, id: string) {
+  async softRemoveByClient(clientId: string, targetUserId: string, actorUserId: string) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
-    const target = await this.prisma.internalUser.findUnique({ where: { id }, select: { id: true, clientId: true } });
+    const [target, actor] = await Promise.all([
+      this.prisma.internalUser.findUnique({ where: { id: targetUserId }, select: { id: true, clientId: true, role: true, isOwner: true } }),
+      this.prisma.internalUser.findUnique({ where: { id: actorUserId }, select: { id: true, clientId: true, role: true, isOwner: true } }),
+    ]);
     if (!target || target.clientId !== clientId) throw new NotFoundException('Utente non trovato');
-    await this.prisma.internalUser.update({ where: { id }, data: { status: 'SUSPENDED' as any } });
+    if (!actor || actor.clientId !== clientId) throw new ForbiddenException('Operazione non consentita');
+
+    // Policy:
+    // - solo ADMIN possono eliminare
+    // - un ADMIN può eliminare un altro ADMIN solo se è owner
+    // - l'owner può essere eliminato solo da se stesso (self-delete)
+    const actorRole = String((actor as any).role || '').toUpperCase();
+    const targetRole = String((target as any).role || '').toUpperCase();
+    const actorIsOwner = !!(actor as any).isOwner;
+    const targetIsOwner = !!(target as any).isOwner;
+
+    if (actorRole !== 'ADMIN') throw new ForbiddenException('Operazione non consentita');
+    // Owner non eliminabile via API tenant (neppure self-delete)
+    if (targetIsOwner) throw new ForbiddenException('Owner non eliminabile');
+    if (targetRole === 'ADMIN' && actor.id !== target.id && !actorIsOwner) {
+      throw new ForbiddenException('Solo l\'owner può eliminare un admin');
+    }
+
+    // Non lasciare zero ADMIN attivi nel tenant
+    const remainingAdmins = await this.prisma.internalUser.count({
+      where: { clientId, role: 'ADMIN' as any, status: 'ACTIVE' as any, id: { not: targetUserId } },
+    } as any);
+    if (remainingAdmins === 0) {
+      throw new ForbiddenException('Deve restare almeno un ADMIN attivo nel tenant');
+    }
+
+    await this.prisma.internalUser.update({ where: { id: targetUserId }, data: { status: 'SUSPENDED' as any } });
     return;
   }
 
+  /**
+   * HARD DELETE: rimuove l'utente e scollega i riferimenti (report assegnati, log, sessioni, token).
+   */
+  async hardRemoveByClient(clientId: string, targetUserId: string, actorUserId: string) {
+    if (!clientId) throw new BadRequestException('Tenant non valido');
+    const [target, actor] = await Promise.all([
+      this.prisma.internalUser.findUnique({ where: { id: targetUserId }, select: { id: true, clientId: true, role: true, isOwner: true } }),
+      this.prisma.internalUser.findUnique({ where: { id: actorUserId }, select: { id: true, clientId: true, role: true, isOwner: true } }),
+    ]);
+    if (!target || target.clientId !== clientId) throw new NotFoundException('Utente non trovato');
+    if (!actor || actor.clientId !== clientId) throw new ForbiddenException('Operazione non consentita');
+
+    const actorRole = String((actor as any).role || '').toUpperCase();
+    const targetRole = String((target as any).role || '').toUpperCase();
+    const actorIsOwner = !!(actor as any).isOwner;
+    const targetIsOwner = !!(target as any).isOwner;
+
+    if (actorRole !== 'ADMIN') throw new ForbiddenException('Operazione non consentita');
+    // Owner non eliminabile via API tenant (neppure self-delete)
+    if (targetIsOwner) throw new ForbiddenException('Owner non eliminabile');
+    if (targetRole === 'ADMIN' && actor.id !== target.id && !actorIsOwner) {
+      throw new ForbiddenException('Solo l\'owner può eliminare un admin');
+    }
+
+    // Non lasciare zero ADMIN attivi nel tenant
+    const remainingAdmins = await this.prisma.internalUser.count({
+      where: { clientId, role: 'ADMIN' as any, status: 'ACTIVE' as any, id: { not: targetUserId } },
+    } as any);
+    if (remainingAdmins === 0) {
+      throw new ForbiddenException('Deve restare almeno un ADMIN attivo nel tenant');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.whistleReport.updateMany({ where: { clientId, internalUserId: targetUserId }, data: { internalUserId: null, assignedAt: null } }),
+      this.prisma.reportMessage.updateMany({ where: { authorId: targetUserId }, data: { authorId: null } } as any),
+      this.prisma.reportStatusHistory.updateMany({ where: { clientId, agentId: targetUserId }, data: { agentId: null } } as any),
+      this.prisma.refreshSession.deleteMany({ where: { userId: targetUserId } }),
+      this.prisma.userRecoveryCode.deleteMany({ where: { userId: targetUserId } } as any),
+      this.prisma.userToken.deleteMany({ where: { userId: targetUserId } }),
+      this.prisma.internalUser.delete({ where: { id: targetUserId } }),
+    ] as any);
+
+    return;
+  }
   async invite(clientId: string, dto: InviteUserDto) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
     const email = (dto.email || '').toLowerCase().trim();

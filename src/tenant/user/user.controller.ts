@@ -62,9 +62,22 @@ export class UserController {
   @HttpCode(204)
   remove(@Req() req: Request, @Param('id') id: string) {
     const clientId = (req as any)?.user?.clientId as string;
-    return this.service.softRemoveByClient(clientId, id);
+    const actorId = (req as any)?.user?.sub as string;
+    return this.service.softRemoveByClient(clientId, id, actorId);
   }
 
+  @Delete(':id/hard')
+  @ApiOperation({
+    summary: 'Elimina definitivamente un utente (HARD DELETE)',
+    description:
+      'Rimuove l\'utente dal DB e scollega i riferimenti: unassign dai report, azzera authorId/agentId nei log. Operazione irreversibile.',
+  })
+  @HttpCode(204)
+  hardRemove(@Req() req: Request, @Param('id') id: string) {
+    const clientId = (req as any)?.user?.clientId as string;
+    const actorId = (req as any)?.user?.sub as string;
+    return this.service.hardRemoveByClient(clientId, id, actorId);
+  }
   @Post('invite')
   @ApiOperation({ summary: 'Invita un utente (ADMIN o AGENT) creando un token di attivazione' })
   async invite(@Req() req: Request, @Body() dto: InviteUserDto) {
