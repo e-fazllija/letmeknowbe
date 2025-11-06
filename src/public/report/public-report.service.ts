@@ -111,7 +111,6 @@ export class PublicReportService {
       select: { id: true },
     });
     if (!department) {
-      // 404 generico per scoping mismatch
       throw new NotFoundException('Risorsa non trovata');
     }
 

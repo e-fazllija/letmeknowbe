@@ -14,7 +14,7 @@ import { PlatformOptionalGuard } from '../../platform/guards/platform-optional.g
     SubscriptionService,
     PrismaPublicService,
     PlatformOptionalGuard,
-    // PrismaTenantService is provided by TenantModule
+    // PrismaTenantService da TenantModule
   ],
 })
 export class SubscriptionModule {}

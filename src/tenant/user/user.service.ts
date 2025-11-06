@@ -166,7 +166,28 @@ export class UserService {
       },
     });
 
-    // TODO: invio email con (selector, rawToken)
+    // Dev convenience: log activation link (do not persist raw token)
+    try {
+      const frontendBase = (process.env.FRONTEND_BASE_URL || '').trim().replace(/\/$/, '');
+      const apiBase = (process.env.API_BASE_URL || '').trim().replace(/\/$/, '');
+      const activationUrl = frontendBase
+        ? `${frontendBase}/activate?selector=${encodeURIComponent(selector)}&token=${encodeURIComponent(rawToken)}`
+        : (apiBase ? `${apiBase}/public/auth/activate?selector=${encodeURIComponent(selector)}&token=${encodeURIComponent(rawToken)}` : undefined);
+
+      const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
+      const exposeUrl = String(process.env.INVITE_EXPOSE_URL || (isProd ? 'false' : 'true')).toLowerCase() === 'true';
+      const exposeToken = String(process.env.INVITE_EXPOSE_TOKEN || (isProd ? 'false' : 'false')).toLowerCase() === 'true';
+      if (activationUrl && exposeUrl) {
+        // eslint-disable-next-line no-console
+        console.info('[invite] activation link', { email, expiresAt: expiresAt.toISOString(), activationUrl });
+        if (exposeToken) {
+          // eslint-disable-next-line no-console
+          console.info('[invite] selector/token (dev only)', { selector, token: rawToken });
+        }
+      }
+    } catch {}
+
+    // TODO: invio email reale con (selector, rawToken) quando SMTP è configurato
     return { userId: user.id };
   }
 }
