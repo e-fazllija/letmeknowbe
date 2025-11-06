@@ -465,6 +465,17 @@ updateMessageBody(
     return this.service.assignTo(req, reportId, userId);
   }
 
+  // PRESA IN CARICO (solo assegnatario): promuove OPEN -> IN_PROGRESS (idempotente)
+  @Post(':reportId/take')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Presa in carico del caso (solo assegnatario)', description: 'Aggiorna lo stato a IN_PROGRESS se attualmente OPEN. Idempotente se già IN_PROGRESS.' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  take(@Req() req: Request, @Param('reportId') reportId: string) {
+    return this.service.take(req, reportId);
+  }
+
   @Post(':reportId/unassign')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')

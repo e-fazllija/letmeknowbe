@@ -116,7 +116,7 @@ export class ReportService {
             clientId: repClientId,
             reportId: repId,
             author: 'system',
-            body: 'Segnalazione presa in carico (visualizzata).',
+            body: 'Dettaglio visualizzato per la prima volta.',
             note: 'SLA_ACK_ON_VIEW',
             visibility: 'SYSTEM' as any,
           },
@@ -879,6 +879,74 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
 
     const filename = `report_${report.publicCode || report.id}.pdf`;
     return { buffer, filename };
+  }
+
+  /**
+   * Presa in carico (solo assegnatario): promuove OPEN -> IN_PROGRESS
+   * Idempotente se già IN_PROGRESS. Rifiuta altri stati.
+   */
+  async take(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+
+    const report = await this.prisma.whistleReport.findFirst({
+      where: { id: reportId, clientId: tenantId },
+      select: { id: true, clientId: true, status: true, internalUserId: true, inProgressAt: true, assignedAt: true },
+    });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+
+    if (report.internalUserId !== userId) {
+      throw new ForbiddenException('Solo l\'assegnatario può prendere in carico');
+    }
+
+    if (report.status === ReportStatus.IN_PROGRESS) {
+      return { message: 'ALREADY_IN_PROGRESS', reportId };
+    }
+    if (report.status !== ReportStatus.OPEN) {
+      throw new BadRequestException('Azione non consentita per lo stato attuale');
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.whistleReport.updateMany({
+      where: { id: reportId, clientId: tenantId, status: ReportStatus.OPEN as any },
+      data: { status: ReportStatus.IN_PROGRESS as any, inProgressAt: now },
+    });
+    if (updated.count !== 1) {
+      // Race: stato cambiato nel frattempo
+      const cur = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { status: true, inProgressAt: true } });
+      if (cur?.status === ReportStatus.IN_PROGRESS) return { message: 'ALREADY_IN_PROGRESS', reportId };
+      throw new ConflictException('Aggiornamento concorrente, riprovare');
+    }
+
+    // Audit: storico stato + messaggio SYSTEM
+    await this.prisma.reportStatusHistory.create({
+      data: {
+        clientId: tenantId,
+        reportId,
+        status: ReportStatus.IN_PROGRESS as any,
+        author: 'system',
+        agentId: userId,
+      },
+    });
+    await this.prisma.reportMessage.create({
+      data: {
+        clientId: tenantId,
+        reportId,
+        author: 'system',
+        body: 'Caso preso in carico dall\'assegnatario.',
+        note: 'CASE_TAKEN',
+        visibility: 'SYSTEM' as any,
+      },
+    });
+
+    const fresh = await this.prisma.whistleReport.findFirst({
+      where: { id: reportId, clientId: tenantId },
+      select: { id: true, status: true, internalUserId: true, assignedAt: true, inProgressAt: true },
+    });
+    // eslint-disable-next-line no-console
+    console.info('report taken', { reportId, by: userId });
+    return { message: 'TAKEN', report: fresh };
   }
 
   /**
