@@ -422,7 +422,13 @@ export class ReportService {
     const canViewAll = (userId && tenant) ? this.canViewAllSync(tenant, userId) : true;
 
     if (userRole === 'AGENT' && !canViewAll && userId) {
-      where.OR = [{ internalUserId: userId }, { internalUserId: null }];
+      const agentScope = [{ internalUserId: userId }, { internalUserId: null }];
+      if (where.OR) {
+        where.AND = [{ OR: (where.OR as any) }, { OR: (agentScope as any) }] as any;
+        delete where.OR;
+      } else {
+        where.OR = agentScope;
+      }
     }
 
     return this.prisma.whistleReport.findMany({
@@ -879,6 +885,78 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
 
     const filename = `report_${report.publicCode || report.id}.pdf`;
     return { buffer, filename };
+  }
+
+  /**
+   * Collega allegati (TMP) a un report esistente (post-creazione).
+   * Idempotente: allegati già collegati finiscono in `existing`.
+   */
+  async attachToReport(
+    req: any,
+    reportId: string,
+    dto: { attachments?: Array<{ storageKey: string; fileName: string; mimeType: string; sizeBytes: number; etag?: string; hmac?: string }> },
+  ) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+
+    // Verifica visibilità/permessi operativi (assegnatario o admin con bypass)
+    await this.ensureCanOperate(req, reportId, tenantId);
+
+    const items = Array.isArray(dto?.attachments) ? dto!.attachments : [];
+    if (items.length === 0) throw new BadRequestException('Nessun allegato da collegare');
+
+    const created: any[] = [];
+    const existing: string[] = [];
+    const rejected: Array<{ storageKey?: string; reason: string }> = [];
+
+    for (const it of items) {
+      try {
+        if (!it?.storageKey || !it?.fileName || !it?.mimeType || !it?.sizeBytes) {
+          throw new BadRequestException('Dati allegato mancanti');
+        }
+        if (!it.storageKey.startsWith(`${tenantId}/tmp/`)) {
+          throw new BadRequestException('storageKey non valido');
+        }
+
+        // Idempotenza: se già legato al report, non duplicare
+        const prev = await this.prisma.reportAttachment.findFirst({ where: { reportId, storageKey: it.storageKey }, select: { id: true } });
+        if (prev) {
+          existing.push(it.storageKey);
+          continue;
+        }
+
+        const att = await this.prisma.reportAttachment.create({
+          data: {
+            reportId,
+            fileName: it.fileName,
+            mimeType: it.mimeType,
+            sizeBytes: it.sizeBytes,
+            storageKey: it.storageKey,
+            etag: it.etag as any,
+          },
+          select: { id: true, fileName: true, mimeType: true, sizeBytes: true, status: true as any, createdAt: true },
+        } as any);
+        created.push(att);
+
+        // Audit SYSTEM message (best-effort)
+        try {
+          await this.prisma.reportMessage.create({
+            data: {
+              clientId: tenantId,
+              reportId,
+              author: 'system',
+              body: `Allegato collegato: ${it.fileName} (${it.mimeType})`,
+              note: 'ATTACH_LINKED',
+              visibility: 'SYSTEM' as any,
+            },
+          });
+        } catch {}
+      } catch (e: any) {
+        rejected.push({ storageKey: it?.storageKey, reason: e?.message || 'invalid' });
+      }
+    }
+
+    return { created, existing, rejected };
   }
 
   /**

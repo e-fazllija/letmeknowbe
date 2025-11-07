@@ -15,6 +15,7 @@ import { Roles } from '../../common/guards/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { S3StorageService } from '../../storage/s3-storage.service';
 import { AttachmentsFinalizeDto } from '../../public/report/dto/attachments-finalize.dto';
+import { TenantAttachmentsLinkDto } from './dto/tenant-attach.dto';
 import * as crypto from 'crypto';
 
 @ApiTags('Tenant - Segnalazioni')
@@ -406,6 +407,18 @@ updateMessageBody(
     }
 
     return { accepted, rejected };
+  }
+
+  // TENANT: collega allegati esistenti (in TMP) a un report
+  @Post(':reportId/attachments')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Collega allegati caricati (TMP) al report', description: 'Idempotente: allegati già collegati sono riportati in existing.' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  @ApiBody({ type: TenantAttachmentsLinkDto })
+  attachToReport(@Req() req: Request, @Param('reportId') reportId: string, @Body() dto: TenantAttachmentsLinkDto) {
+    return this.service.attachToReport(req, reportId, dto);
   }
 
   // TENANT: carica trascrizione manuale (nota INTERNAL)
