@@ -220,9 +220,9 @@ export class ReportService {
     }
 
     // Scoping forte: department/category appartengono al tenant e si relazionano correttamente
-    const dep = await this.prisma.department.findFirst({ where: { id: departmentId, clientId: tenantId, active: true }, select: { id: true } });
+    const dep = await this.prisma.department.findFirst({ where: { id: departmentId, active: true, OR: [{ clientId: tenantId }, { clientId: null }] }, select: { id: true } });
     if (!dep) throw new NotFoundException('Risorsa non trovata');
-    const cat = await this.prisma.category.findFirst({ where: { id: categoryId, clientId: tenantId, departmentId, active: true }, select: { id: true } });
+    const cat = await this.prisma.category.findFirst({ where: { id: categoryId, departmentId, active: true, OR: [{ clientId: tenantId }, { clientId: null }] }, select: { id: true } });
     if (!cat) throw new NotFoundException('Risorsa non trovata');
 
     // Allegati policy (identica al public)

@@ -26,7 +26,15 @@ export class CasePolicyController {
   @ApiOperation({ summary: 'Aggiorna le policy del tenant' })
   update(
     @Req() req: Request,
-    @Body() body: { restrictVisibility?: boolean; allowMentions?: boolean; redactPii?: boolean; allowAttachments?: boolean },
+    @Body() body: {
+      restrictVisibility?: boolean;
+      allowMentions?: boolean;
+      redactPii?: boolean;
+      allowAttachments?: boolean;
+      publicShowGlobalLookups?: boolean;
+      publicShowTenantLookups?: boolean;
+      publicLookupPreference?: 'PREFER_TENANT' | 'PREFER_GLOBAL' | 'SHOW_ALL';
+    },
   ) {
     const clientId = (req as any)?.user?.clientId as string;
     return this.service.upsert(clientId, body);

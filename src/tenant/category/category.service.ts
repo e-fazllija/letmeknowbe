@@ -9,17 +9,19 @@ export class CategoryService {
 
   findAll(clientId: string, departmentId?: string) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
-    return this.prisma.category.findMany({
-      where: { clientId, active: true, ...(departmentId ? { departmentId } : {}) },
-      select: { id: true, name: true, departmentId: true },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-    });
+    return this.prisma.category
+      .findMany({
+        where: { active: true, ...(departmentId ? { departmentId } : {}), OR: [{ clientId }, { clientId: null }] },
+        select: { id: true, name: true, departmentId: true, clientId: true },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      })
+      .then((rows) => rows.map((r) => ({ id: r.id, name: r.name, departmentId: r.departmentId, readOnly: r.clientId == null })));
   }
 
   async create(clientId: string, dto: CreateCategoryDto) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
     // verify department belongs to tenant
-    const dep = await this.prisma.department.findFirst({ where: { id: dto.departmentId, clientId, active: true }, select: { id: true } });
+    const dep = await this.prisma.department.findFirst({ where: { id: dto.departmentId, active: true, OR: [{ clientId }, { clientId: null }] }, select: { id: true } });
     if (!dep) throw new NotFoundException('Reparto non trovato');
     return this.prisma.category.create({ data: { clientId, departmentId: dto.departmentId, name: dto.name, active: true }, select: { id: true, name: true, departmentId: true } });
   }
@@ -29,7 +31,7 @@ export class CategoryService {
     const cat = await this.prisma.category.findFirst({ where: { id, clientId } });
     if (!cat) throw new NotFoundException('Categoria non trovata');
     if (dto.departmentId) {
-      const dep = await this.prisma.department.findFirst({ where: { id: dto.departmentId, clientId, active: true }, select: { id: true } });
+      const dep = await this.prisma.department.findFirst({ where: { id: dto.departmentId, active: true, OR: [{ clientId }, { clientId: null }] }, select: { id: true } });
       if (!dep) throw new NotFoundException('Reparto non trovato');
     }
     return this.prisma.category.update({ where: { id }, data: { name: dto.name ?? cat.name, departmentId: dto.departmentId ?? cat.departmentId }, select: { id: true, name: true, departmentId: true } });

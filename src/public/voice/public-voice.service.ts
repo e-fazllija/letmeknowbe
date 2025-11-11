@@ -118,9 +118,24 @@ export class PublicVoiceService {
   async createVoiceReport(tenantId: string, dto: CreateVoiceReportDto, req: Request) {
     if (!tenantId) throw new BadRequestException('Richiesta non valida');
 
-    const department = await this.prisma.department.findFirst({ where: { id: dto.departmentId, clientId: tenantId, active: true }, select: { id: true } });
+    // Applica la policy di visibilita' lookups per il pubblico
+    let policy: { publicShowGlobalLookups: boolean; publicShowTenantLookups: boolean } = { publicShowGlobalLookups: true, publicShowTenantLookups: true };
+    try {
+      const p = await (this.prisma as any).casePolicy.findUnique({ where: { clientId: tenantId } });
+      policy = {
+        publicShowGlobalLookups: p?.publicShowGlobalLookups !== false,
+        publicShowTenantLookups: p?.publicShowTenantLookups !== false,
+      };
+    } catch {}
+    const depOr: any[] = [];
+    if (policy.publicShowTenantLookups) depOr.push({ clientId: tenantId });
+    if (policy.publicShowGlobalLookups) depOr.push({ clientId: null });
+    const department = await this.prisma.department.findFirst({ where: { id: dto.departmentId, active: true, OR: depOr }, select: { id: true } });
     if (!department) throw new NotFoundException('Risorsa non trovata');
-    const category = await this.prisma.category.findFirst({ where: { id: dto.categoryId, clientId: tenantId, departmentId: dto.departmentId, active: true }, select: { id: true } });
+    const catOr: any[] = [];
+    if (policy.publicShowTenantLookups) catOr.push({ clientId: tenantId });
+    if (policy.publicShowGlobalLookups) catOr.push({ clientId: null });
+    const category = await this.prisma.category.findFirst({ where: { id: dto.categoryId, departmentId: dto.departmentId, active: true, OR: catOr }, select: { id: true } });
     if (!category) throw new NotFoundException('Risorsa non trovata');
 
     const attachments = dto.attachments || [];

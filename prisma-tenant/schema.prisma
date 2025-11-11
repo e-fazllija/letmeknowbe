@@ -101,7 +101,7 @@ enum UserTokenType {
 // Lookup per-tenant: Reparti
 model Department {
   id        String   @id @default(cuid())
-  clientId  String
+  clientId  String?
   name      String
   active    Boolean  @default(true)
   sortOrder Int      @default(0)
@@ -117,7 +117,7 @@ model Department {
 // Lookup per-tenant: Categorie (per reparto)
 model Category {
   id           String   @id @default(cuid())
-  clientId     String
+  clientId     String?
   departmentId String
   name         String
   active       Boolean  @default(true)
@@ -454,6 +454,13 @@ enum AttachmentStatus {
   INFECTED
 }
 
+// Preferenza deduplica lookups per il form pubblico
+enum LookupPreference {
+  PREFER_TENANT
+  PREFER_GLOBAL
+  SHOW_ALL
+}
+
 // Case policy per-tenant (impostazioni)
 model CasePolicy {
   clientId           String   @id
@@ -462,6 +469,11 @@ model CasePolicy {
   redactPii          Boolean  @default(false)
   allowAttachments   Boolean  @default(true)
   updatedAt          DateTime @updatedAt
+
+  // Visibilità lookups sul form pubblico
+  publicShowGlobalLookups  Boolean           @default(true)
+  publicShowTenantLookups  Boolean           @default(true)
+  publicLookupPreference   LookupPreference  @default(PREFER_TENANT)
 }
 
 // Templates per questionari interni

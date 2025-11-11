@@ -9,11 +9,13 @@ export class DepartmentService {
 
   findAll(clientId: string) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
-    return this.prisma.department.findMany({
-      where: { clientId, active: true },
-      select: { id: true, name: true },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-    });
+    return this.prisma.department
+      .findMany({
+        where: { active: true, OR: [{ clientId }, { clientId: null }] },
+        select: { id: true, name: true, clientId: true },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      })
+      .then((rows) => rows.map((r) => ({ id: r.id, name: r.name, readOnly: r.clientId == null })));
   }
 
   async create(clientId: string, dto: CreateDepartmentDto) {

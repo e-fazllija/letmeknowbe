@@ -69,18 +69,19 @@ export class PublicReportService {
   private async maybeAutoBootstrapLookups(tenantId: string) {
     const auto = isTrue(process.env.AUTO_BOOTSTRAP_LOOKUPS);
     if (!auto) return;
-    const existing = await this.prisma.department.count({ where: { clientId: tenantId } });
+    // Create global defaults once (clientId = null)
+    const existing = await this.prisma.department.count({ where: { clientId: null } });
     if (existing > 0) return;
     const defs = this.defaults();
     await this.prisma.$transaction(async (tx) => {
       for (const d of defs) {
         const dep = await tx.department.create({
-          data: { clientId: tenantId, name: d.name, sortOrder: d.sortOrder, active: true },
+          data: { clientId: null, name: d.name, sortOrder: d.sortOrder, active: true },
         });
         if (d.categories?.length) {
           await tx.category.createMany({
             data: d.categories.map((c, idx) => ({
-              clientId: tenantId,
+              clientId: null,
               departmentId: dep.id,
               name: c,
               active: true,
@@ -92,33 +93,79 @@ export class PublicReportService {
     });
   }
 
+  private async getPolicyForTenant(tenantId: string) {
+    try {
+      const p = await (this.prisma as any).casePolicy.findUnique({ where: { clientId: tenantId } });
+      return {
+        publicShowGlobalLookups: p?.publicShowGlobalLookups !== false,
+        publicShowTenantLookups: p?.publicShowTenantLookups !== false,
+        publicLookupPreference: (p?.publicLookupPreference || 'PREFER_TENANT') as 'PREFER_TENANT' | 'PREFER_GLOBAL' | 'SHOW_ALL',
+      };
+    } catch {
+      return { publicShowGlobalLookups: true, publicShowTenantLookups: true, publicLookupPreference: 'PREFER_TENANT' as const };
+    }
+  }
+
+  private dedupeByName<T extends { name: string; clientId?: string | null }>(rows: T[], pref: 'PREFER_TENANT' | 'PREFER_GLOBAL' | 'SHOW_ALL', tenantId: string): T[] {
+    if (pref === 'SHOW_ALL') return rows;
+    const preferTenant = pref === 'PREFER_TENANT';
+    const map = new Map<string, T>();
+    for (const r of rows) {
+      const key = (r.name || '').trim().toLowerCase();
+      const ex = map.get(key);
+      if (!ex) { map.set(key, r); continue; }
+      const rIsTenant = (r as any).clientId === tenantId;
+      const exIsTenant = (ex as any).clientId === tenantId;
+      const pickR = preferTenant ? (rIsTenant && !exIsTenant) : (!rIsTenant && exIsTenant);
+      if (pickR) map.set(key, r);
+    }
+    return Array.from(map.values());
+  }
+
   async listDepartments(tenantId: string) {
     if (!tenantId) throw new BadRequestException('Richiesta non valida');
     await this.maybeAutoBootstrapLookups(tenantId);
-    return this.prisma.department.findMany({
-      where: { clientId: tenantId, active: true },
-      select: { id: true, name: true, sortOrder: true },
+    const policy = await this.getPolicyForTenant(tenantId);
+    const or: any[] = [];
+    if (policy.publicShowTenantLookups) or.push({ clientId: tenantId });
+    if (policy.publicShowGlobalLookups) or.push({ clientId: null });
+    if (or.length === 0) return [];
+    const rows = await this.prisma.department.findMany({
+      where: { active: true, OR: or },
+      select: { id: true, name: true, sortOrder: true, clientId: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
+    const filtered = this.dedupeByName(rows, policy.publicLookupPreference, tenantId);
+    return filtered.map((r) => ({ id: r.id, name: r.name, sortOrder: r.sortOrder, readOnly: r.clientId == null }));
   }
 
   async listCategories(tenantId: string, departmentId: string) {
     if (!tenantId) throw new BadRequestException('Richiesta non valida');
     if (!departmentId) throw new BadRequestException('departmentId mancante');
 
+    const policy = await this.getPolicyForTenant(tenantId);
+    const depOr: any[] = [];
+    if (policy.publicShowTenantLookups) depOr.push({ clientId: tenantId });
+    if (policy.publicShowGlobalLookups) depOr.push({ clientId: null });
+    if (depOr.length === 0) throw new NotFoundException('Risorsa non trovata');
     const department = await this.prisma.department.findFirst({
-      where: { id: departmentId, clientId: tenantId, active: true },
+      where: { id: departmentId, active: true, OR: depOr },
       select: { id: true },
     });
     if (!department) {
       throw new NotFoundException('Risorsa non trovata');
     }
 
-    return this.prisma.category.findMany({
-      where: { clientId: tenantId, departmentId, active: true },
-      select: { id: true, name: true, sortOrder: true },
+    const catOr: any[] = [];
+    if (policy.publicShowTenantLookups) catOr.push({ clientId: tenantId });
+    if (policy.publicShowGlobalLookups) catOr.push({ clientId: null });
+    const rows = await this.prisma.category.findMany({
+      where: { departmentId, active: true, OR: catOr },
+      select: { id: true, name: true, sortOrder: true, clientId: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
+    const filtered = this.dedupeByName(rows, policy.publicLookupPreference, tenantId);
+    return filtered.map((r) => ({ id: r.id, name: r.name, sortOrder: r.sortOrder, readOnly: r.clientId == null }));
   }
 
   async presign(tenantId: string, body?: any) {
@@ -196,14 +243,21 @@ export class PublicReportService {
     if (!tenantId) throw new BadRequestException('Richiesta non valida');
 
     // Validate department/category scoping
+    const policy = await this.getPolicyForTenant(tenantId);
+    const orDep: any[] = [];
+    if (policy.publicShowTenantLookups) orDep.push({ clientId: tenantId });
+    if (policy.publicShowGlobalLookups) orDep.push({ clientId: null });
     const department = await this.prisma.department.findFirst({
-      where: { id: dto.departmentId, clientId: tenantId, active: true },
+      where: { id: dto.departmentId, active: true, OR: orDep },
       select: { id: true },
     });
     if (!department) throw new NotFoundException('Risorsa non trovata');
 
+    const orCat: any[] = [];
+    if (policy.publicShowTenantLookups) orCat.push({ clientId: tenantId });
+    if (policy.publicShowGlobalLookups) orCat.push({ clientId: null });
     const category = await this.prisma.category.findFirst({
-      where: { id: dto.categoryId, clientId: tenantId, departmentId: dto.departmentId, active: true },
+      where: { id: dto.categoryId, departmentId: dto.departmentId, active: true, OR: orCat },
       select: { id: true },
     });
     if (!category) throw new NotFoundException('Risorsa non trovata');
