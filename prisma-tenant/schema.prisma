@@ -183,6 +183,11 @@ model InternalUser {
   RefreshSession RefreshSession[]
   recoveryCodes  UserRecoveryCode[]
 
+  // Backrelation: note personali
+  personalNotes ReportPersonalNote[]
+  // Backrelation: report assegnati come AUDITOR
+  auditReports  ReportAuditor[]
+
   @@unique([clientId, email])
   @@index([clientId])
 }
@@ -234,11 +239,11 @@ model WhistleReport {
   privacy              ReporterPrivacy @default(ANONIMO)
   departmentId         String?
   categoryId           String?
-    containsPIISuspected Boolean         @default(false)
-    // Nominativo segnalante (cifrato AES-GCM, solo per privacy=CONFIDENZIALE)
-    reporterNameEnc     String?
-    ipHash               String?         @db.VarChar(128)
-    ua                   String?
+  containsPIISuspected Boolean         @default(false)
+  // Nominativo segnalante (cifrato AES-GCM, solo per privacy=CONFIDENZIALE)
+  reporterNameEnc      String?
+  ipHash               String?         @db.VarChar(128)
+  ua                   String?
   retentionAt          DateTime?
 
   internalUserId String?
@@ -247,11 +252,15 @@ model WhistleReport {
   // Assegnazione casi
   assignedAt DateTime?
 
-  publicUsers PublicUser[]
-  messages    ReportMessage[]
-  statusLogs  ReportStatusHistory[]
-  attachments ReportAttachment[]
-  accessLogs  ReportAccessLog[]
+  publicUsers   PublicUser[]
+  messages      ReportMessage[]
+  statusLogs    ReportStatusHistory[]
+  attachments   ReportAttachment[]
+  accessLogs    ReportAccessLog[]
+  // Backrelation: note personali
+  personalNotes ReportPersonalNote[]
+  // Backrelation: auditor assignments
+  auditors      ReportAuditor[]
 
   @@index([clientId])
   @@index([status])
@@ -330,6 +339,38 @@ model ReportAttachment {
   scannedAt DateTime?
   virusName String?
 
+  @@index([reportId])
+}
+
+// Note personali per utente su report (private, non in timeline)
+model ReportPersonalNote {
+  id        String   @id @default(cuid())
+  clientId  String
+  reportId  String
+  userId    String
+  body      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  user   InternalUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, userId])
+  @@index([clientId, reportId, userId])
+  @@index([reportId])
+}
+
+// Relazione di assegnazione per AUDITOR (solo lettura)
+model ReportAuditor {
+  reportId   String
+  auditorId  String
+  assignedAt DateTime @default(now())
+
+  report  WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  auditor InternalUser  @relation(fields: [auditorId], references: [id], onDelete: Cascade)
+
+  @@id([reportId, auditorId])
+  @@index([auditorId, reportId])
   @@index([reportId])
 }
 

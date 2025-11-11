@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, ForbiddenException, NotImplementedException, ConflictException, InternalServerErrorException } from '@nestjs/common';
+﻿import { Injectable, NotFoundException, BadRequestException, PayloadTooLargeException, ForbiddenException, NotImplementedException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { PrismaTenantService } from '../prisma-tenant.service';
 import { NotificationsService } from '../../common/notifications/notifications.service';
 import { CreateReportDto } from './dto/create-report.dto';
@@ -11,6 +11,7 @@ import { Request } from 'express';
 import { RequestInfoDto } from './dto/request-info.dto';
 import { VoiceTranscriptDto } from './dto/voice-transcript.dto';
 import { decryptPII, encryptPII, parseKeyFromEnv } from '../../common/security/pii-crypto';
+import { maskPII, shortHash } from '../../common/pii/mask';
 
 // Helper locale: aggiunge giorni a una data
 function addDays(base: Date, days: number): Date {
@@ -38,6 +39,12 @@ export class ReportService {
     const userId = req?.user?.sub as string | undefined;
     const userRole = ((req?.user?.role as string) || 'ADMIN').toUpperCase();
 
+    // AUDITOR: consentito solo se assegnato esplicitamente via ReportAuditor
+    if (userRole === 'AUDITOR') {
+      const assigned = await (this.prisma as any).reportAuditor?.findFirst?.({ where: { reportId, auditorId: userId } });
+      if (!assigned) throw new NotFoundException('Segnalazione non trovata');
+    };
+
     let report = await this.prisma.whistleReport.findFirst({
       where: { id: reportId, clientId: tenantId },
       include: {
@@ -49,8 +56,8 @@ export class ReportService {
     });
     if (!report) throw new NotFoundException('Segnalazione non trovata');
 
-    // Visibilità: se assegnato ad altri e l'utente non ha canViewAllCases, blocca
-    if (report.internalUserId && userId && report.internalUserId !== userId) {
+    // Visibilità: se assegnato ad altri e l'utente non ha canViewAllCases, blocca (non per AUDITOR)
+    if (userRole !== 'AUDITOR' && report.internalUserId && userId && report.internalUserId !== userId) {
       const viewer = await this.prisma.internalUser.findUnique({ where: { id: userId }, select: { canViewAllCases: true } });
       if (!viewer?.canViewAllCases) {
         // privacy hardening: non rivelare l'esistenza
@@ -103,7 +110,7 @@ export class ReportService {
     // Type guard post-refresh
     if (!report) throw new NotFoundException('Segnalazione non trovata');
     const current = report; // non-null
-    if (!current.acknowledgeAt) {
+    if (userRole !== 'AUDITOR' && !current.acknowledgeAt) {
       const now = new Date();
       const responseDays = parseInt(process.env.RESPONSE_TTL_DAYS || '90', 10);
       const dueAt = addDays(now, isNaN(responseDays) ? 90 : responseDays);
@@ -145,7 +152,21 @@ export class ReportService {
         await (this.prisma as any).reportAccessLog.create({ data: { reportId, userId, clientId: tenantId, action: 'VIEW', ip: ip || undefined, ua } });
       }
     } catch {}
-    // Decrypt reporterName for backoffice and avoid leaking encrypted blob
+    // Serializzazione finale
+    if (userRole === 'AUDITOR') {
+      // Mask PII, no reporter name
+      const rep: any = { ...(report as any) };
+      delete rep.reporterNameEnc;
+      delete rep.reporterName;
+      if (Array.isArray(rep.messages)) {
+        rep.messages = rep.messages.map((m: any) => ({ ...m, body: maskPII(m.body || '') }));
+      }
+      rep.title = maskPII(rep.title || '');
+      if (rep.summary) rep.summary = maskPII(rep.summary || '');
+      const alias = `Reporter-${shortHash(`${tenantId}:${rep.id}:${rep.publicCode || ''}`)}`;
+      rep.reporterAlias = alias;
+      return rep;
+    }
     try {
       const enc = (report as any)?.reporterNameEnc as string | undefined;
       if (enc) {
@@ -400,6 +421,9 @@ export class ReportService {
   /**
    * Elenco segnalazioni per cliente (solo admin/agent)
    */
+  /**
+   * Elenco segnalazioni per cliente (solo admin/agent)
+   */
   listReports(req: any, clientId: string, opts?: { page?: number; pageSize?: number; status?: string; departmentId?: string; categoryId?: string; q?: string }) {
     const page = Math.max(opts?.page || 1, 1);
     const pageSize = Math.min(Math.max(opts?.pageSize || 20, 1), 100);
@@ -421,6 +445,13 @@ export class ReportService {
     const tenant = req?.user?.clientId as string | undefined;
     const canViewAll = (userId && tenant) ? this.canViewAllSync(tenant, userId) : true;
 
+    // AUDITOR: solo report assegnati come auditor
+    if (userRole === 'AUDITOR' && userId) {
+      const andArr: any[] = Array.isArray((where as any).AND) ? (where as any).AND : [];
+      andArr.push({ auditors: { some: { auditorId: userId } } } as any);
+      (where as any).AND = andArr;
+    }
+
     if (userRole === 'AGENT' && !canViewAll && userId) {
       const agentScope = [{ internalUserId: userId }, { internalUserId: null }];
       if (where.OR) {
@@ -435,13 +466,7 @@ export class ReportService {
       where,
       include: {
         messages: {
-          select: {
-            id: true,
-            author: true,
-            body: true,
-            note: true,
-            createdAt: true,
-          },
+          select: { id: true, author: true, body: true, note: true, createdAt: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -450,6 +475,9 @@ export class ReportService {
     });
   }
 
+  // Helpers permessi/visibilità
+  private isTrue(v?: string) { return v === '1' || (v || '').toLowerCase() === 'true'; }
+
   // Sync helper: best-effort read of canViewAllCases (avoid second query path complexities here)
   private canViewAllCache = new Map<string, { v: boolean; t: number }>();
   private canViewAllSync(tenantId: string, userId: string): boolean {
@@ -457,7 +485,6 @@ export class ReportService {
     const hit = this.canViewAllCache.get(key);
     const now = Date.now();
     if (hit && now - hit.t < 10_000) return hit.v; // 10s cache
-    // Fire and forget update of cache; return conservative true by default to avoid over-restricting
     (async () => {
       try {
         const u = await this.prisma.internalUser.findUnique({ where: { id: userId }, select: { canViewAllCases: true } });
@@ -467,15 +494,18 @@ export class ReportService {
     return !!hit?.v;
   }
 
-  // Helpers permessi/visibilità
-  private isTrue(v?: string) { return v === '1' || (v || '').toLowerCase() === 'true'; }
-
   private async ensureCanView(req: any, reportId: string, tenantId: string) {
     const userId = req?.user?.sub as string | undefined;
     if (!userId) throw new BadRequestException('Tenant non valido');
+    const role = ((req?.user?.role as string) || 'ADMIN').toUpperCase();
+    if (role === 'AUDITOR') {
+      const assigned = await (this.prisma as any).reportAuditor?.findFirst?.({ where: { reportId, auditorId: userId } });
+      if (!assigned) throw new NotFoundException('Segnalazione non trovata');
+      return;
+    }
     const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { internalUserId: true } });
     if (!report) throw new NotFoundException('Segnalazione non trovata');
-    if (report.internalUserId && report.internalUserId !== userId) {
+    if ((report as any).internalUserId && (report as any).internalUserId !== userId) {
       const viewer = await this.prisma.internalUser.findUnique({ where: { id: userId }, select: { canViewAllCases: true } });
       if (!viewer?.canViewAllCases) throw new ForbiddenException('Operazione non consentita');
     }
@@ -488,35 +518,16 @@ export class ReportService {
     const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { internalUserId: true } });
     if (!report) throw new NotFoundException('Segnalazione non trovata');
 
-    const canAdminsBypass = this.isTrue(process.env.CAN_ADMINS_BYPASS_ASSIGNMENT || 'true'); // default true
-    const reqOpsAgent = this.isTrue(process.env.REQUIRE_ASSIGNMENT_FOR_OPS_AGENT || 'true'); // default true
-    const reqOpsAdmin = this.isTrue(process.env.REQUIRE_ASSIGNMENT_FOR_OPS_ADMIN || 'false'); // default false
+    const canAdminsBypass = this.isTrue(process.env.CAN_ADMINS_BYPASS_ASSIGNMENT || 'true');
+    const reqOpsAgent = this.isTrue(process.env.REQUIRE_ASSIGNMENT_FOR_OPS_AGENT || 'true');
+    const reqOpsAdmin = this.isTrue(process.env.REQUIRE_ASSIGNMENT_FOR_OPS_ADMIN || 'false');
 
-    if (report.internalUserId === userId) return; // assegnatario
-    if (role === 'ADMIN' && canAdminsBypass && !reqOpsAdmin) return; // admin bypass
-
-    // Se non assegnato e agent: richiedi claim esplicito
-    if (!report.internalUserId && role === 'AGENT' && reqOpsAgent) {
+    if ((report as any).internalUserId === userId) return; // assegnatario
+    if (role === 'ADMIN' && canAdminsBypass && !reqOpsAdmin) return; // bypass admin
+    if (!(report as any).internalUserId && role === 'AGENT' && reqOpsAgent) {
       throw new ForbiddenException('Requiere assegnazione (usa /assign/me)');
     }
     throw new ForbiddenException('Operazione non consentita');
-  }
-
-  /**
-   * Aggiunge un messaggio a una segnalazione
-   */
-  addMessage(dto: CreateReportMessageDto) {
-    return this.prisma.reportMessage.create({ data: dto });
-  }
-
-  /**
-   * Elenco messaggi per una segnalazione
-   */
-  listMessages(reportId: string) {
-    return this.prisma.reportMessage.findMany({
-      where: { reportId },
-      orderBy: { createdAt: 'asc' },
-    });
   }
 
   /**
@@ -527,504 +538,87 @@ export class ReportService {
     const userId = req?.user?.sub as string | undefined;
     if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
 
-    // Scoping report
     const report = await this.prisma.whistleReport.findFirst({ where: { id: dto.reportId, clientId: tenantId }, select: { id: true } });
     if (!report) throw new NotFoundException('Risorsa non trovata');
     await this.ensureCanOperate(req, dto.reportId, tenantId);
 
     const vis = ((dto.visibility || 'INTERNAL').toUpperCase()) as 'PUBLIC' | 'INTERNAL';
-    if (vis !== 'PUBLIC' && vis !== 'INTERNAL') {
-      throw new BadRequestException('Visibility non valida');
-    }
+    if (vis !== 'PUBLIC' && vis !== 'INTERNAL') throw new BadRequestException('Visibility non valida');
 
     const authorDisplay = vis === 'PUBLIC' ? 'AGENTE' : (req?.user?.email || 'AGENTE');
-
     const message = await this.prisma.reportMessage.create({
-      data: {
-        clientId: tenantId,
-        reportId: dto.reportId,
-        author: authorDisplay,
-        authorId: userId,
-        body: dto.body,
-        visibility: vis as any,
-      },
+      data: { clientId: tenantId, reportId: dto.reportId, author: authorDisplay, authorId: userId, body: dto.body, visibility: vis as any },
     });
-
     return { message: 'Messaggio aggiunto con successo', item: message };
   }
 
-  /**
-   * TENANT: lista messaggi con filtro visibility
-   */
+  /** TENANT: lista messaggi con filtro visibility */
   async listMessagesTenant(req: any, reportId: string, visibility?: string) {
     const tenantId = req?.user?.clientId as string | undefined;
     if (!tenantId) throw new BadRequestException('Tenant non valido');
-
-    // Scoping report
     const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { id: true } });
     if (!report) throw new NotFoundException('Risorsa interna non trovata');
     await this.ensureCanView(req, reportId, tenantId);
 
-    let filter: any = { reportId, clientId: tenantId };
+    const where: any = { reportId, clientId: tenantId };
     if (visibility && visibility.toUpperCase() !== 'ALL') {
       const parts = visibility.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
       const allowed = ['PUBLIC', 'INTERNAL', 'SYSTEM'];
       const selected = parts.filter((p) => allowed.includes(p));
-      if (selected.length > 0) filter.visibility = { in: selected as any };
+      if (selected.length > 0) where.visibility = { in: selected as any };
     }
-
-    return this.prisma.reportMessage.findMany({ where: filter, orderBy: { createdAt: 'asc' } });
+    return this.prisma.reportMessage.findMany({ where, orderBy: { createdAt: 'asc' } });
   }
 
-  /**
-   * PATCH — aggiorna lo stato della segnalazione
-   */
+  /** PATCH: aggiorna lo stato del report (SLA) */
   async updateStatus(req: any, reportId: string, dto: CreateReportStatusDto) {
     const tokenClientId = req?.user?.clientId as string | undefined;
     if (!tokenClientId) throw new BadRequestException('Tenant non valido');
-    const report = await this.prisma.whistleReport.findFirst({
-      where: { id: reportId, clientId: tokenClientId },
-    });
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tokenClientId } });
     if (!report) throw new NotFoundException('Segnalazione non trovata');
     await this.ensureCanOperate(req, reportId, tokenClientId);
 
     const now = new Date();
     const newStatus = dto.status as ReportStatus;
-
-    if (report.status === ReportStatus.OPEN) {
-      const limit = addDays(report.openAt ?? report.createdAt, this.STATUS_DURATIONS.OPEN);
-      if (now > limit && newStatus !== ReportStatus.IN_PROGRESS) {
-        throw new BadRequestException('Tempo massimo per passare da OPEN a IN_PROGRESS scaduto');
-      }
+    if ((report as any).status === 'OPEN') {
+      const limit = addDays((report as any).openAt ?? (report as any).createdAt, this.STATUS_DURATIONS.OPEN);
+      if (now > limit && newStatus !== 'IN_PROGRESS') throw new BadRequestException('Tempo massimo per passare da OPEN a IN_PROGRESS scaduto');
     }
-
-    if (report.status === ReportStatus.IN_PROGRESS) {
-      const limit = addDays(report.inProgressAt ?? now, this.STATUS_DURATIONS.IN_PROGRESS);
-      if (now > limit && newStatus !== ReportStatus.CLOSED) {
-        throw new BadRequestException('Tempo massimo per chiudere il report scaduto');
-      }
+    if ((report as any).status === 'IN_PROGRESS') {
+      const limit = addDays((report as any).inProgressAt ?? now, this.STATUS_DURATIONS.IN_PROGRESS);
+      if (now > limit && newStatus !== 'CLOSED') throw new BadRequestException('Tempo massimo per chiudere il report scaduto');
     }
-
     const data: any = { status: newStatus };
-    if (newStatus === ReportStatus.OPEN) data.openAt = now;
-    if (newStatus === ReportStatus.IN_PROGRESS) data.inProgressAt = now;
-    if (newStatus === ReportStatus.CLOSED) data.finalClosedAt = now;
-
-    await this.prisma.whistleReport.update({
-      where: { id: reportId },
-      data,
-    });
-
-    // eslint-disable-next-line no-console
-    console.info('report status updated', { reportId, status: newStatus });
-
-    // Scrivi storico cambi di stato (audit)
-    await this.prisma.reportStatusHistory.create({
-      data: {
-        clientId: report.clientId,
-        reportId: report.id,
-        note: dto.note ?? undefined,
-        author: dto.author ?? undefined,
-        agentId: dto.agentId ?? undefined,
-        status: newStatus,
-      },
-    });
-    
-    // Se NEED_INFO, crea messaggio di sistema con richiesta chiarimenti
-    if ((dto.status || '').toUpperCase() === 'NEED_INFO') {
-      const defaultBody = 'Richiesta di informazioni aggiuntive da parte del team. Per favore fornisci i dettagli mancanti utili alla gestione.';
-      const body = dto.note ? `${defaultBody}\n\nDettagli: ${dto.note}` : defaultBody;
-      await this.prisma.reportMessage.create({
-        data: {
-          clientId: report.clientId,
-          reportId: report.id,
-          author: dto.author || 'system',
-          body,
-          note: undefined,
-          visibility: 'SYSTEM' as any,
-        },
-      });
-    }
-
+    if (newStatus === 'OPEN') data.openAt = now;
+    if (newStatus === 'IN_PROGRESS') data.inProgressAt = now;
+    if (newStatus === 'CLOSED') data.finalClosedAt = now;
+    await this.prisma.whistleReport.update({ where: { id: reportId }, data });
+    await this.prisma.reportStatusHistory.create({ data: { clientId: (report as any).clientId, reportId: (report as any).id, note: dto.note ?? undefined, author: dto.author ?? undefined, agentId: dto.agentId ?? undefined, status: newStatus } });
     return { message: 'Stato segnalazione aggiornato con successo', newStatus };
   }
 
-  /**
-* PATCH — aggiorna la nota interna di un messaggio
-* (solo admin/agent)
-*/
-async updateMessageNoteTenant(req: any, reportId: string, messageId: string, note: string) {
-  const tenantId = req?.user?.clientId as string | undefined;
-  if (!tenantId) throw new BadRequestException('Tenant non valido');
-  await this.ensureCanOperate(req, reportId, tenantId);
-  const message = await this.prisma.reportMessage.findFirst({ where: { id: messageId, reportId, clientId: tenantId } });
-  if (!message) throw new NotFoundException('Messaggio non trovato');
-  if ((message as any).visibility !== 'INTERNAL') throw new ForbiddenException('Non è consentito modificare questo messaggio');
-
-  const updatedMessage = await this.prisma.reportMessage.update({ where: { id: messageId }, data: { note } });
-  return { message: 'Nota del messaggio aggiornata con successo', updatedMessage };
-}
-
-/**
-* PATCH — aggiorna il contenuto (body) del messaggio
-* (solo admin/agent)
-*/
-async updateMessageBodyTenant(req: any, reportId: string, messageId: string, body: string) {
-  const tenantId = req?.user?.clientId as string | undefined;
-  if (!tenantId) throw new BadRequestException('Tenant non valido');
-  await this.ensureCanOperate(req, reportId, tenantId);
-  const message = await this.prisma.reportMessage.findFirst({ where: { id: messageId, reportId, clientId: tenantId } });
-  if (!message) throw new NotFoundException('Messaggio non trovato');
-  if ((message as any).visibility !== 'INTERNAL') throw new ForbiddenException('Non è consentito modificare questo messaggio');
-
-  const updatedMessage = await this.prisma.reportMessage.update({ where: { id: messageId }, data: { body } });
-  return { message: 'Contenuto del messaggio aggiornato con successo', updatedMessage };
-}
-
-
-  /**
-   * DELETE — elimina una segnalazione
-   */
-  async deleteReport(req: any, reportId: string) {
-    const report = await this.prisma.whistleReport.findUnique({ where: { id: reportId } });
-    if (!report) throw new NotFoundException('Segnalazione non trovata');
-
-    const tokenClientId = req?.user?.clientId as string | undefined;
-    if (!tokenClientId || tokenClientId !== report.clientId) {
-      // eslint-disable-next-line no-console
-      console.warn('deleteReport forbidden: tenant mismatch');
-      throw new ForbiddenException('Operazione non consentita');
-    }
-    await this.ensureCanOperate(req, reportId, tokenClientId);
-
-    await this.prisma.reportMessage.deleteMany({ where: { reportId } });
-    await this.prisma.publicUser.deleteMany({ where: { reportId } });
-    await this.prisma.whistleReport.delete({ where: { id: reportId } });
-
-    // eslint-disable-next-line no-console
-    console.info('report deleted', { reportId });
-
-    return { message: 'Segnalazione eliminata con successo', id: reportId };
-  }
-
-  /**
-   * TENANT: Richiesta chiarimenti (NEED_INFO + messaggio PUBLIC)
-   */
-  async requestInfo(req: any, reportId: string, dto: RequestInfoDto) {
-    const tenantId = req?.user?.clientId as string | undefined;
-    const userId = req?.user?.sub as string | undefined;
-    const authorEmail = req?.user?.email as string | undefined;
-    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
-
-    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId } });
-    if (!report) throw new NotFoundException('Segnalazione non trovata');
-
-    // Aggiorna stato a NEED_INFO (crea anche messaggio SYSTEM via updateStatus)
-    await this.updateStatus(req, reportId, {
-      clientId: tenantId,
-      reportId,
-      status: 'NEED_INFO' as any,
-      note: dto.note,
-      author: authorEmail || 'system',
-      agentId: userId,
-    } as any);
-
-    // Messaggio pubblico al segnalante
-    const pub = await this.prisma.reportMessage.create({
-      data: {
-        clientId: tenantId,
-        reportId,
-        author: 'AGENTE',
-        authorId: userId,
-        body: dto.message,
-        visibility: 'PUBLIC' as any,
-      },
-    });
-
-    return { message: 'Richiesta chiarimenti inviata', status: 'NEED_INFO', publicMessageId: pub.id };
-  }
-
-  // Assegnazioni
-  async assignMe(req: any, reportId: string) {
-    const tenantId = req?.user?.clientId as string | undefined;
-    const userId = req?.user?.sub as string | undefined;
-    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
-    const updated = await this.prisma.whistleReport.updateMany({ where: { id: reportId, clientId: tenantId, internalUserId: null }, data: { internalUserId: userId, assignedAt: new Date() } });
-    if (updated.count !== 1) {
-      const current = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { internalUserId: true } });
-      if (current?.internalUserId === userId) {
-        return { message: 'ASSIGNED', reportId };
-      }
-      throw new ConflictException({ message: 'ALREADY_ASSIGNED', assignedTo: current?.internalUserId });
-    }
-    await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: 'Caso assegnato a se stessi', note: 'CASE_ASSIGNED', visibility: 'SYSTEM' as any } });
-    try { await this.notify.notifyAssignment(tenantId, reportId, userId!, { byUserId: userId! }); } catch {}
-    return { message: 'ASSIGNED', reportId };
-  }
-
-  async assignTo(req: any, reportId: string, userId: string) {
-    const tenantId = req?.user?.clientId as string | undefined;
-    const byUserId = req?.user?.sub as string | undefined;
-    if (!tenantId) throw new BadRequestException('Tenant non valido');
-    // ensure target exists and belongs to tenant
-    const target = await this.prisma.internalUser.findFirst({ where: { id: userId, clientId: tenantId }, select: { id: true } });
-    if (!target) throw new NotFoundException('Utente target non trovato');
-    await this.prisma.whistleReport.update({ where: { id: reportId }, data: { internalUserId: userId, assignedAt: new Date() } });
-    await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: `Caso assegnato a utente ${userId}`, note: 'CASE_ASSIGNED', visibility: 'SYSTEM' as any } });
-    try { await this.notify.notifyAssignment(tenantId, reportId, userId, { byUserId }); } catch {}
-    return { message: 'ASSIGNED', reportId, userId };
-  }
-
-  async unassign(req: any, reportId: string) {
+  // PATCH: aggiorna la nota (solo messaggi INTERNAL)
+  async updateMessageNoteTenant(req: any, reportId: string, messageId: string, note: string) {
     const tenantId = req?.user?.clientId as string | undefined;
     if (!tenantId) throw new BadRequestException('Tenant non valido');
-    await this.prisma.whistleReport.update({ where: { id: reportId }, data: { internalUserId: null } });
-    await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: 'Caso rimosso dall\'assegnazione', note: 'CASE_UNASSIGNED', visibility: 'SYSTEM' as any } });
-    return { message: 'UNASSIGNED', reportId };
-  }
-
-  /**
-   * TENANT: aggiunge una trascrizione (nota INTERNAL)
-   */
-  async addVoiceTranscript(req: any, reportId: string, dto: VoiceTranscriptDto) {
-    const tenantId = req?.user?.clientId as string | undefined;
-    const userId = req?.user?.sub as string | undefined;
-    const authorEmail = req?.user?.email as string | undefined;
-    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
-
-    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId } });
-    if (!report) throw new NotFoundException('Segnalazione non trovata');
-
-    const msg = await this.prisma.reportMessage.create({
-      data: {
-        clientId: tenantId,
-        reportId,
-        author: authorEmail || 'AGENTE',
-        authorId: userId,
-        body: dto.transcript,
-        visibility: 'INTERNAL' as any,
-        note: 'Trascrizione audio',
-      },
-    });
-
-    return { message: 'Trascrizione aggiunta', item: msg };
-  }
-
-  // ACCESS LOGS (ADMIN/AUDITOR)
-  async getAccessLogs(req: any, reportId: string) {
-    const tenantId = req?.user?.clientId as string | undefined;
-    if (!tenantId) throw new BadRequestException('Tenant non valido');
-    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { id: true } });
-    if (!report) throw new NotFoundException('Segnalazione non trovata');
-    return (this.prisma as any).reportAccessLog.findMany({ where: { reportId }, orderBy: { createdAt: 'desc' } });
-  }
-
-  // EXPORT PDF (MOCK/PDFKIT)
-  async exportPdf(req: any, reportId: string): Promise<{ buffer: Buffer; filename: string }> {
-    const tenantId = req?.user?.clientId as string | undefined;
-    const userId = req?.user?.sub as string | undefined;
-    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
-    const report = await this.prisma.whistleReport.findFirst({
-      where: { id: reportId, clientId: tenantId },
-      select: {
-        id: true,
-        publicCode: true,
-        status: true,
-        title: true,
-        summary: true,
-        createdAt: true,
-        updatedAt: true,
-        eventDate: true,
-        privacy: true,
-        channel: true,
-        messages: { select: { id: true, author: true, body: true, createdAt: true, visibility: true }, orderBy: { createdAt: 'asc' } },
-      },
-    });
-    if (!report) throw new NotFoundException('Segnalazione non trovata');
-
-    const engine = (process.env.PDF_ENGINE || 'MOCK').toUpperCase();
-    let buffer: Buffer;
-    if (engine === 'PDFKIT') {
-      try {
-        const modName = 'pdfkit';
-        // Use dynamic specifier to avoid TS static resolution when module is not installed
-        const PDFDocument = (await import(modName as any)).default as any;
-        const doc = new PDFDocument({ size: 'A4', margin: 48 });
-        const chunks: Buffer[] = [];
-        doc.on('data', (d: Buffer) => chunks.push(d));
-        const done = new Promise<Buffer>((resolve) => doc.on('end', () => resolve(Buffer.concat(chunks))));
-        doc.fontSize(16).text('LetMeKnow - Export Segnalazione', { align: 'center' });
-        doc.moveDown();
-        doc.fontSize(12).text(`Codice: ${report.publicCode}`);
-        doc.text(`Stato: ${report.status}`);
-        doc.text(`Titolo: ${report.title}`);
-        if (report.summary) doc.text(`Descrizione: ${report.summary}`);
-        doc.text(`Creato: ${report.createdAt.toISOString()}`);
-        doc.moveDown();
-        doc.text('Messaggi:', { underline: true });
-        for (const m of report.messages) {
-          doc.moveDown(0.5).fontSize(10).text(`[${m.createdAt.toISOString()}] ${m.author} (${m.visibility}): ${m.body}`);
-        }
-        doc.end();
-        buffer = await done;
-      } catch (e) {
-        throw new NotImplementedException('PDF engine non disponibile (installa pdfkit o usa MOCK)');
-      }
-    } else {
-      // MOCK: semplice PDF minimale usando testo base
-      const content = `Report ${report.publicCode}\nStato: ${report.status}\nTitolo: ${report.title}`;
-      buffer = Buffer.from(`PDF MOCK\n${content}`, 'utf8');
-    }
-
-    // Access log (EXPORT)
-    try {
-      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || (req.socket?.remoteAddress || '');
-      const ua = (req.headers['user-agent'] as string) || undefined;
-      await (this.prisma as any).reportAccessLog.create({ data: { reportId, userId, clientId: tenantId, action: 'EXPORT', ip: ip || undefined, ua } });
-    } catch {}
-
-    const filename = `report_${report.publicCode || report.id}.pdf`;
-    return { buffer, filename };
-  }
-
-  /**
-   * Collega allegati (TMP) a un report esistente (post-creazione).
-   * Idempotente: allegati già collegati finiscono in `existing`.
-   */
-  async attachToReport(
-    req: any,
-    reportId: string,
-    dto: { attachments?: Array<{ storageKey: string; fileName: string; mimeType: string; sizeBytes: number; etag?: string; hmac?: string }> },
-  ) {
-    const tenantId = req?.user?.clientId as string | undefined;
-    if (!tenantId) throw new BadRequestException('Tenant non valido');
-
-    // Verifica visibilità/permessi operativi (assegnatario o admin con bypass)
     await this.ensureCanOperate(req, reportId, tenantId);
-
-    const items = Array.isArray(dto?.attachments) ? dto!.attachments : [];
-    if (items.length === 0) throw new BadRequestException('Nessun allegato da collegare');
-
-    const created: any[] = [];
-    const existing: string[] = [];
-    const rejected: Array<{ storageKey?: string; reason: string }> = [];
-
-    for (const it of items) {
-      try {
-        if (!it?.storageKey || !it?.fileName || !it?.mimeType || !it?.sizeBytes) {
-          throw new BadRequestException('Dati allegato mancanti');
-        }
-        if (!it.storageKey.startsWith(`${tenantId}/tmp/`)) {
-          throw new BadRequestException('storageKey non valido');
-        }
-
-        // Idempotenza: se già legato al report, non duplicare
-        const prev = await this.prisma.reportAttachment.findFirst({ where: { reportId, storageKey: it.storageKey }, select: { id: true } });
-        if (prev) {
-          existing.push(it.storageKey);
-          continue;
-        }
-
-        const att = await this.prisma.reportAttachment.create({
-          data: {
-            reportId,
-            fileName: it.fileName,
-            mimeType: it.mimeType,
-            sizeBytes: it.sizeBytes,
-            storageKey: it.storageKey,
-            etag: it.etag as any,
-          },
-          select: { id: true, fileName: true, mimeType: true, sizeBytes: true, status: true as any, createdAt: true },
-        } as any);
-        created.push(att);
-
-        // Audit SYSTEM message (best-effort)
-        try {
-          await this.prisma.reportMessage.create({
-            data: {
-              clientId: tenantId,
-              reportId,
-              author: 'system',
-              body: `Allegato collegato: ${it.fileName} (${it.mimeType})`,
-              note: 'ATTACH_LINKED',
-              visibility: 'SYSTEM' as any,
-            },
-          });
-        } catch {}
-      } catch (e: any) {
-        rejected.push({ storageKey: it?.storageKey, reason: e?.message || 'invalid' });
-      }
-    }
-
-    return { created, existing, rejected };
+    const message = await this.prisma.reportMessage.findFirst({ where: { id: messageId, reportId, clientId: tenantId } });
+    if (!message) throw new NotFoundException('Messaggio non trovato');
+    if ((message as any).visibility !== 'INTERNAL') throw new ForbiddenException('Non è consentito modificare questo messaggio');
+    const updatedMessage = await this.prisma.reportMessage.update({ where: { id: messageId }, data: { note } });
+    return { message: 'Nota del messaggio aggiornata con successo', updatedMessage };
   }
 
-  /**
-   * Presa in carico (solo assegnatario): promuove OPEN -> IN_PROGRESS
-   * Idempotente se già IN_PROGRESS. Rifiuta altri stati.
-   */
-  async take(req: any, reportId: string) {
+  // PATCH: aggiorna il body (solo messaggi INTERNAL)
+  async updateMessageBodyTenant(req: any, reportId: string, messageId: string, body: string) {
     const tenantId = req?.user?.clientId as string | undefined;
-    const userId = req?.user?.sub as string | undefined;
-    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
-
-    const report = await this.prisma.whistleReport.findFirst({
-      where: { id: reportId, clientId: tenantId },
-      select: { id: true, clientId: true, status: true, internalUserId: true, inProgressAt: true, assignedAt: true },
-    });
-    if (!report) throw new NotFoundException('Segnalazione non trovata');
-
-    if (report.internalUserId !== userId) {
-      throw new ForbiddenException('Solo l\'assegnatario può prendere in carico');
-    }
-
-    if (report.status === ReportStatus.IN_PROGRESS) {
-      return { message: 'ALREADY_IN_PROGRESS', reportId };
-    }
-    if (report.status !== ReportStatus.OPEN) {
-      throw new BadRequestException('Azione non consentita per lo stato attuale');
-    }
-
-    const now = new Date();
-    const updated = await this.prisma.whistleReport.updateMany({
-      where: { id: reportId, clientId: tenantId, status: ReportStatus.OPEN as any },
-      data: { status: ReportStatus.IN_PROGRESS as any, inProgressAt: now },
-    });
-    if (updated.count !== 1) {
-      // Race: stato cambiato nel frattempo
-      const cur = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { status: true, inProgressAt: true } });
-      if (cur?.status === ReportStatus.IN_PROGRESS) return { message: 'ALREADY_IN_PROGRESS', reportId };
-      throw new ConflictException('Aggiornamento concorrente, riprovare');
-    }
-
-    // Audit: storico stato + messaggio SYSTEM
-    await this.prisma.reportStatusHistory.create({
-      data: {
-        clientId: tenantId,
-        reportId,
-        status: ReportStatus.IN_PROGRESS as any,
-        author: 'system',
-        agentId: userId,
-      },
-    });
-    await this.prisma.reportMessage.create({
-      data: {
-        clientId: tenantId,
-        reportId,
-        author: 'system',
-        body: 'Caso preso in carico dall\'assegnatario.',
-        note: 'CASE_TAKEN',
-        visibility: 'SYSTEM' as any,
-      },
-    });
-
-    const fresh = await this.prisma.whistleReport.findFirst({
-      where: { id: reportId, clientId: tenantId },
-      select: { id: true, status: true, internalUserId: true, assignedAt: true, inProgressAt: true },
-    });
-    // eslint-disable-next-line no-console
-    console.info('report taken', { reportId, by: userId });
-    return { message: 'TAKEN', report: fresh };
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+    await this.ensureCanOperate(req, reportId, tenantId);
+    const message = await this.prisma.reportMessage.findFirst({ where: { id: messageId, reportId, clientId: tenantId } });
+    if (!message) throw new NotFoundException('Messaggio non trovato');
+    if ((message as any).visibility !== 'INTERNAL') throw new ForbiddenException('Non è consentito modificare questo messaggio');
+    const updatedMessage = await this.prisma.reportMessage.update({ where: { id: messageId }, data: { body } });
+    return { message: 'Contenuto del messaggio aggiornato con successo', updatedMessage };
   }
 
   /**
@@ -1056,6 +650,237 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
     return items;
   }
 
+  /** DELETE: elimina report e dati correlati */
+  async deleteReport(req: any, reportId: string) {
+    const report = await this.prisma.whistleReport.findUnique({ where: { id: reportId } });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+    const tokenClientId = req?.user?.clientId as string | undefined;
+    if (!tokenClientId || tokenClientId !== (report as any).clientId) throw new ForbiddenException('Operazione non consentita');
+    await this.ensureCanOperate(req, reportId, tokenClientId);
+
+    await this.prisma.reportMessage.deleteMany({ where: { reportId } });
+    try { await (this.prisma as any).reportPersonalNote?.deleteMany?.({ where: { reportId } }); } catch {}
+    await this.prisma.publicUser.deleteMany({ where: { reportId } });
+    await this.prisma.whistleReport.delete({ where: { id: reportId } });
+    return { message: 'Segnalazione eliminata con successo', id: reportId };
+  }
+
+  /** Azione rapida: richiesta di chiarimenti (NEED_INFO + messaggio PUBLIC) */
+  async requestInfo(req: any, reportId: string, dto: RequestInfoDto) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    const authorEmail = req?.user?.email as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId } });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+    await this.updateStatus(req, reportId, { clientId: tenantId, reportId, status: 'NEED_INFO' as any, note: dto.note, author: authorEmail || 'system', agentId: userId } as any);
+    const pub = await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'AGENTE', authorId: userId, body: dto.message, visibility: 'PUBLIC' as any } });
+    return { message: 'Richiesta chiarimenti inviata', status: 'NEED_INFO', publicMessageId: pub.id };
+  }
+
+  /** Trascrizione voce: crea messaggio INTERNAL */
+  async addVoiceTranscript(req: any, reportId: string, dto: VoiceTranscriptDto) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+    await this.ensureCanOperate(req, reportId, tenantId);
+    const msg = await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: (req?.user?.email || 'AGENTE'), authorId: userId, body: dto?.transcript || '', visibility: 'INTERNAL' as any } });
+    return { messageId: msg.id, createdAt: msg.createdAt };
+  }
+
+  /** Access log per report */
+  async getAccessLogs(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+    await this.ensureCanView(req, reportId, tenantId);
+    return (this.prisma as any).reportAccessLog.findMany({ where: { reportId }, orderBy: { createdAt: 'desc' } });
+  }
+
+  // EXPORT PDF (MOCK)
+  async exportPdf(req: any, reportId: string): Promise<{ buffer: Buffer; filename: string }> {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+    const report = await this.prisma.whistleReport.findFirst({
+      where: { id: reportId, clientId: tenantId },
+      select: { id: true, publicCode: true, status: true, title: true, summary: true, createdAt: true, updatedAt: true, eventDate: true, privacy: true, channel: true, messages: { select: { id: true, author: true, body: true, createdAt: true, visibility: true }, orderBy: { createdAt: 'asc' } } },
+    });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+    const content = `Report ${report.publicCode}\nStato: ${report.status}\nTitolo: ${report.title}`;
+    const buffer = Buffer.from(`PDF MOCK\n${content}`, 'utf8');
+    try {
+      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || (req.socket?.remoteAddress || '');
+      const ua = (req.headers['user-agent'] as string) || undefined;
+      await (this.prisma as any).reportAccessLog.create({ data: { reportId, userId, clientId: tenantId, action: 'EXPORT', ip: ip || undefined, ua } });
+    } catch {}
+    const filename = `report_${report.publicCode || report.id}.pdf`;
+    return { buffer, filename };
+  }
+
+  // Assegnazioni
+  async assignMe(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+    const updated = await this.prisma.whistleReport.updateMany({ where: { id: reportId, clientId: tenantId, internalUserId: null }, data: { internalUserId: userId, assignedAt: new Date() } });
+    if (updated.count !== 1) {
+      const current = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { internalUserId: true } });
+      if (current?.internalUserId === userId) return { message: 'ASSIGNED', reportId };
+      throw new ConflictException({ message: 'ALREADY_ASSIGNED', assignedTo: current?.internalUserId });
+    }
+    await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: 'Caso assegnato a se stessi', note: 'CASE_ASSIGNED', visibility: 'SYSTEM' as any } });
+    try { await this.notify.notifyAssignment(tenantId, reportId, userId!, { byUserId: userId! }); } catch {}
+    return { message: 'ASSIGNED', reportId };
+  }
+
+  async assignTo(req: any, reportId: string, userId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const byUserId = req?.user?.sub as string | undefined;
+    if (!tenantId || !byUserId) throw new BadRequestException('Tenant non valido');
+    await this.prisma.whistleReport.update({ where: { id: reportId }, data: { internalUserId: userId, assignedAt: new Date() } });
+    await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: `Caso assegnato a utente ${userId}`, note: 'CASE_ASSIGNED', visibility: 'SYSTEM' as any } });
+    try { await this.notify.notifyAssignment(tenantId, reportId, userId, { byUserId }); } catch {}
+    return { message: 'ASSIGNED', reportId, userId };
+  }
+
+  async unassign(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+    await this.prisma.whistleReport.update({ where: { id: reportId }, data: { internalUserId: null } });
+    await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: 'Caso rimosso dall\'assegnazione', note: 'CASE_UNASSIGNED', visibility: 'SYSTEM' as any } });
+    return { message: 'UNASSIGNED', reportId };
+  }
+
+  // Presa in carico
+  async take(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { id: true, clientId: true, status: true, internalUserId: true, inProgressAt: true, assignedAt: true } });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+    if ((report as any).internalUserId !== userId) throw new ForbiddenException('Solo l\'assegnatario può prendere in carico');
+    if ((report as any).status === 'IN_PROGRESS') return { message: 'ALREADY_IN_PROGRESS', reportId };
+    if ((report as any).status !== 'OPEN') throw new BadRequestException('Azione non consentita per lo stato attuale');
+    const now = new Date();
+    const updated = await this.prisma.whistleReport.updateMany({ where: { id: reportId, clientId: tenantId, status: 'OPEN' as any }, data: { status: 'IN_PROGRESS' as any, inProgressAt: now } });
+    if (updated.count !== 1) {
+      const cur = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { status: true, inProgressAt: true } });
+      if ((cur as any)?.status === 'IN_PROGRESS') return { message: 'ALREADY_IN_PROGRESS', reportId };
+      throw new ConflictException('Aggiornamento concorrente, riprovare');
+    }
+    await this.prisma.reportStatusHistory.create({ data: { clientId: tenantId, reportId, status: 'IN_PROGRESS' as any, author: 'system', agentId: userId } });
+    await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: 'Caso preso in carico dall\'assegnatario.', note: 'CASE_TAKEN', visibility: 'SYSTEM' as any } });
+    const fresh = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { id: true, status: true, internalUserId: true, assignedAt: true, inProgressAt: true } });
+    return { message: 'TAKEN', report: fresh };
+  }
+
+  // --- Note personali ---
+  private sanitizeNote(input: string): string {
+    const noHtml = String(input || '').replace(/<[^>]*>/g, '');
+    return noHtml.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+  }
+
+  async getMyNote(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+    await this.ensureCanView(req, reportId, tenantId);
+    const note = await (this.prisma as any).reportPersonalNote?.findFirst?.({ where: { clientId: tenantId, reportId, userId }, select: { body: true, updatedAt: true } });
+    return note ? { body: note.body || '', updatedAt: note.updatedAt } : { body: null };
+  }
+
+  async upsertMyNote(req: any, reportId: string, dto: { body: string }) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+    await this.ensureCanView(req, reportId, tenantId);
+    const safe = this.sanitizeNote(typeof dto?.body === 'string' ? dto.body : '');
+    if (safe.length > 15000) throw new BadRequestException('Nota troppo lunga (max ~15KB)');
+    const upserted = await (this.prisma as any).reportPersonalNote?.upsert?.({ where: { reportId_userId: { reportId, userId } }, update: { body: safe }, create: { clientId: tenantId, reportId, userId, body: safe }, select: { body: true, updatedAt: true } });
+    try {
+      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || (req.socket?.remoteAddress || '');
+      const ua = (req.headers['user-agent'] as string) || undefined;
+      await (this.prisma as any).reportAccessLog.create({ data: { reportId, userId, clientId: tenantId, action: 'PERSONAL_NOTE_UPSERT', ip: ip || undefined, ua } });
+    } catch {}
+    return { body: upserted?.body || '', updatedAt: upserted?.updatedAt };
+  }
+
+  async deleteMyNote(req: any, reportId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+    await this.ensureCanView(req, reportId, tenantId);
+    await (this.prisma as any).reportPersonalNote?.deleteMany?.({ where: { clientId: tenantId, reportId, userId } });
+    try {
+      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || (req.socket?.remoteAddress || '');
+      const ua = (req.headers['user-agent'] as string) || undefined;
+      await (this.prisma as any).reportAccessLog.create({ data: { reportId, userId, clientId: tenantId, action: 'PERSONAL_NOTE_DELETE', ip: ip || undefined, ua } });
+    } catch {}
+    return { message: 'DELETED' };
+  }
+
+  // Collegamento allegati (post-creazione)
+  async attachToReport(
+    req: any,
+    reportId: string,
+    dto: { attachments?: Array<{ storageKey: string; fileName: string; mimeType: string; sizeBytes: number; etag?: string; hmac?: string }> },
+  ) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    if (!tenantId) throw new BadRequestException('Tenant non valido');
+    await this.ensureCanOperate(req, reportId, tenantId);
+    const items = Array.isArray(dto?.attachments) ? dto!.attachments : [];
+    if (items.length === 0) throw new BadRequestException('Nessun allegato da collegare');
+    const created: any[] = [];
+    const existing: string[] = [];
+    const rejected: Array<{ storageKey?: string; reason: string }> = [];
+    for (const it of items) {
+      try {
+        if (!it?.storageKey || !it?.fileName || !it?.mimeType || !it?.sizeBytes) throw new BadRequestException('Dati allegato mancanti');
+        if (!it.storageKey.startsWith(`${tenantId}/tmp/`)) throw new BadRequestException('storageKey non valido');
+        const prev = await this.prisma.reportAttachment.findFirst({ where: { reportId, storageKey: it.storageKey }, select: { id: true } });
+        if (prev) { existing.push(it.storageKey); continue; }
+        const att = await this.prisma.reportAttachment.create({
+          data: { reportId, fileName: it.fileName, mimeType: it.mimeType, sizeBytes: it.sizeBytes, storageKey: it.storageKey, etag: it.etag as any },
+          select: { id: true, fileName: true, mimeType: true, sizeBytes: true, status: true as any, createdAt: true },
+        } as any);
+        created.push(att);
+        try { await this.prisma.reportMessage.create({ data: { clientId: tenantId, reportId, author: 'system', body: `Allegato collegato: ${it.fileName} (${it.mimeType})`, note: 'ATTACH_LINKED', visibility: 'SYSTEM' as any } }); } catch {}
+      } catch (e: any) {
+        rejected.push({ storageKey: it?.storageKey, reason: e?.message || 'invalid' });
+      }
+    }
+    return { created, existing, rejected };
+  }
+
+  // Admin: assegna / rimuovi AUDITOR
+  async assignAuditor(req: any, reportId: string, auditorId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const role = ((req?.user?.role as string) || 'ADMIN').toUpperCase();
+    if (!tenantId || role !== 'ADMIN') throw new ForbiddenException('Operazione non consentita');
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { id: true } });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+    const user = await this.prisma.internalUser.findFirst({ where: { id: auditorId, clientId: tenantId }, select: { id: true, role: true } });
+    if (!user || ((user as any).role || '').toString().toUpperCase() !== 'AUDITOR') throw new BadRequestException('Utente non valido o non AUDITOR');
+    try {
+      await (this.prisma as any).reportAuditor.create({ data: { reportId, auditorId } });
+    } catch (e: any) {
+      // ignore unique
+    }
+    try { await (this.prisma as any).reportAccessLog.create({ data: { reportId, userId: auditorId, clientId: tenantId, action: 'AUDITOR_ASSIGNED' } }); } catch {}
+    return { message: 'AUDITOR_ASSIGNED', reportId, auditorId };
+  }
+
+  async unassignAuditor(req: any, reportId: string, auditorId: string) {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const role = ((req?.user?.role as string) || 'ADMIN').toUpperCase();
+    if (!tenantId || role !== 'ADMIN') throw new ForbiddenException('Operazione non consentita');
+    const report = await this.prisma.whistleReport.findFirst({ where: { id: reportId, clientId: tenantId }, select: { id: true } });
+    if (!report) throw new NotFoundException('Segnalazione non trovata');
+    await (this.prisma as any).reportAuditor.deleteMany({ where: { reportId, auditorId } });
+    try { await (this.prisma as any).reportAccessLog.create({ data: { reportId, userId: auditorId, clientId: tenantId, action: 'AUDITOR_UNASSIGNED' } }); } catch {}
+    return { message: 'AUDITOR_UNASSIGNED', reportId, auditorId };
+  }
+
   /**
    * Resolve bucket/key and metadata for an attachment ensuring access rules.
    */
@@ -1077,6 +902,11 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
       select: { id: true, internalUserId: true },
     });
     if (!report) throw new NotFoundException('Segnalazione non trovata');
+    const role = ((req?.user?.role as string) || 'ADMIN').toUpperCase();
+    if (role === 'AUDITOR') {
+      // auditor non può scaricare; deve usare preview
+      throw new ForbiddenException('Not allowed for AUDITOR');
+    }
     if (report.internalUserId && userId && report.internalUserId !== userId) {
       const viewer = await this.prisma.internalUser.findUnique({ where: { id: userId }, select: { canViewAllCases: true } });
       if (!viewer?.canViewAllCases) throw new NotFoundException('Segnalazione non trovata');
@@ -1107,11 +937,30 @@ async updateMessageBodyTenant(req: any, reportId: string, messageId: string, bod
 
     return { bucket, key, fileName: att.fileName, mimeType: att.mimeType || undefined, sizeBytes: att.sizeBytes || undefined, status };
   }
+
+  // Anteprima redatta (placeholder)
+  async previewAttachment(req: any, reportId: string, attachmentId: string): Promise<{ buffer: Buffer; contentType: string }> {
+    const tenantId = req?.user?.clientId as string | undefined;
+    const userId = req?.user?.sub as string | undefined;
+    const role = ((req?.user?.role as string) || 'ADMIN').toUpperCase();
+    if (!tenantId || !userId) throw new BadRequestException('Tenant non valido');
+    // Verifica accesso al report; per AUDITOR richiede assegnazione
+    await this.ensureCanView(req, reportId, tenantId);
+    // Placeholder semplice: PDF mock con watermark
+    const ts = new Date().toISOString();
+    const who = (req?.user?.email || userId);
+    const content = `PREVIEW PLACEHOLDER\nAUDIT – ${who} – ${ts}\nAttachment: ${attachmentId}`;
+    const buffer = Buffer.from(`PDF MOCK\n${content}`, 'utf8');
+    return { buffer, contentType: 'application/pdf' };
+  }
 }
 
 
 
  
+
+
+
 
 
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Query, Req, Res, UseGuards, ForbiddenException, BadRequestException, NotImplementedException, NotFoundException } from '@nestjs/common';
+﻿import { Body, Controller, Delete, Get, Header, Param, Patch, Post, Put, Query, Req, Res, UseGuards, ForbiddenException, BadRequestException, NotImplementedException, NotFoundException } from '@nestjs/common';
 import { ReportService } from './report.service';
 // import { CreateReportDto } from './dto/create-report.dto';
 // import { CreateReportMessageDto } from './dto/create-report-message.dto';
@@ -15,8 +15,10 @@ import { Roles } from '../../common/guards/roles.decorator';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { S3StorageService } from '../../storage/s3-storage.service';
 import { AttachmentsFinalizeDto } from '../../public/report/dto/attachments-finalize.dto';
+import { MyNoteDto } from './dto/my-note.dto';
 import { TenantAttachmentsLinkDto } from './dto/tenant-attach.dto';
 import * as crypto from 'crypto';
+import { AuditorAllowlistGuard } from '../../common/guards/auditor-allowlist.guard';
 
 @ApiTags('Tenant - Segnalazioni')
 @ApiBearerAuth('access-token')
@@ -26,7 +28,7 @@ export class ReportController {
 
   // CREA NUOVA SEGNALAZIONE (TENANT, BACKOFFICE)
   @Post()
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Crea una segnalazione (backoffice) con payload unificato' })
@@ -46,7 +48,7 @@ export class ReportController {
 
   // DETTAGLIO SEGNALAZIONE (TENANT) CON AUTO-ACK ALLA PRIMA LETTURA
   @Get(':reportId')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT', 'AUDITOR')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Dettaglio segnalazione (auto-ack alla prima lettura)' })
@@ -57,8 +59,8 @@ export class ReportController {
 
   // ELENCO ALLEGATI DELLA SEGNALAZIONE
   @Get(':reportId/attachments')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'AGENT', 'AUDITOR')
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Elenco allegati (metadata) della segnalazione' })
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
@@ -68,8 +70,8 @@ export class ReportController {
 
   // DOWNLOAD allegato (stream via BE)
   @Get(':reportId/attachments/:attachmentId/download')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'AGENT', 'AUDITOR')
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Scarica un allegato (stream via backend)' })
   @ApiParam({ name: 'reportId', description: 'ID del report' })
@@ -79,7 +81,7 @@ export class ReportController {
     const head = await this.storage.headObject(meta.bucket, meta.key);
     const stream = await this.storage.getObjectStream(meta.bucket, meta.key);
     if (!stream) {
-      // 404 quando l'oggetto non è disponibile
+      // 404 quando l'oggetto non Ã¨ disponibile
       res.status(404).send('File non trovato');
       return;
     }
@@ -96,8 +98,8 @@ export class ReportController {
 
   // PRESIGN GET (download diretto S3/MinIO)
   @Post(':reportId/attachments/:attachmentId/presign')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'AGENT', 'AUDITOR')
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Genera una URL firmata per scaricare un allegato' })
   @ApiParam({ name: 'reportId', description: 'ID del report' })
@@ -107,6 +109,28 @@ export class ReportController {
     const disposition = `attachment; filename="${(meta.fileName || 'file').replace(/["]+/g, '')}"`;
     const out = await this.storage.presignGet({ bucket: meta.bucket, key: meta.key, expiresInSeconds: 300, responseContentType: meta.mimeType || 'application/octet-stream', responseContentDisposition: disposition });
     return { url: out.url, expiresIn: out.expiresIn };
+  }
+
+  // PREVIEW redatta (placeholder) — consentita all'AUDITOR
+  @Get(':reportId/attachments/:attachmentId/preview')
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT', 'AUDITOR')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Anteprima redatta allegato (placeholder)' })
+  @ApiParam({ name: 'reportId', description: 'ID del report' })
+  @ApiParam({ name: 'attachmentId', description: 'ID dell\'allegato' })
+  @Header('Cache-Control', 'no-store, max-age=0')
+  @Header('Pragma', 'no-cache')
+  async previewAttachment(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Param('reportId') reportId: string,
+    @Param('attachmentId') attachmentId: string,
+  ) {
+    const prev = await this.service.previewAttachment(req, reportId, attachmentId);
+    res.setHeader('X-Viewer-Role', ((req as any)?.user?.role || '').toString().toUpperCase());
+    res.setHeader('Content-Type', prev.contentType || 'application/pdf');
+    return prev.buffer;
   }
 
   // ELENCO SEGNALAZIONI (PER CLIENT)
@@ -119,7 +143,7 @@ export class ReportController {
   @ApiQuery({ name: 'departmentId', required: false })
   @ApiQuery({ name: 'categoryId', required: false })
   @ApiQuery({ name: 'q', required: false, description: 'Ricerca testuale su title/summary' })
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT', 'AUDITOR')
   @ApiBearerAuth('access-token')
   listReports(
@@ -155,7 +179,7 @@ export class ReportController {
 
   // AGGIUNGE UNA NOTA (INTERNAL) O UN MESSAGGIO (PUBLIC) AL REPORT
   @Post('message')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Aggiunge una nota interna (INTERNAL) o un messaggio pubblico (PUBLIC) al report' })
@@ -178,8 +202,8 @@ export class ReportController {
 
   // ELENCO MESSAGGI DI UNA SEGNALAZIONE
   @Get(':reportId/messages')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'AGENT')
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT', 'AUDITOR')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Elenco messaggi di una segnalazione (tenant)' })
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
@@ -188,9 +212,9 @@ export class ReportController {
     return this.service.listMessagesTenant(req, reportId, visibility);
   }
 
-  // PATCH — AGGIORNA STATO DEL REPORT
+  // PATCH â€” AGGIORNA STATO DEL REPORT
   @Patch(':reportId/status')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({
@@ -201,14 +225,14 @@ export class ReportController {
     return this.service.updateStatus(req, reportId, dto);
   }
 
-// PATCH — aggiorna la nota interna di un messaggio
+// PATCH â€” aggiorna la nota interna di un messaggio
 @Patch(':reportId/message/:messageId/note')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'AGENT')
 @ApiBearerAuth('access-token')
 @ApiOperation({
   summary: 'Aggiorna la nota di un messaggio (solo INTERNAL)',
-  description: 'Consente update solo per messaggi INTERNAL. PUBLIC/SYSTEM → 403.',
+  description: 'Consente update solo per messaggi INTERNAL. PUBLIC/SYSTEM â†’ 403.',
 })
 @ApiParam({ name: 'reportId', description: 'ID del report' })
 @ApiParam({ name: 'messageId', description: 'ID del messaggio' })
@@ -230,14 +254,14 @@ updateMessageNote(
   return this.service.updateMessageNoteTenant(req, reportId, messageId, note);
 }
 
-// PATCH — aggiorna il contenuto (body) del messaggio
+// PATCH â€” aggiorna il contenuto (body) del messaggio
 @Patch(':reportId/message/:messageId/body')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles('ADMIN', 'AGENT')
 @ApiBearerAuth('access-token')
 @ApiOperation({
   summary: 'Aggiorna il contenuto (body) di un messaggio (solo INTERNAL)',
-  description: 'Consente update solo per messaggi INTERNAL. PUBLIC/SYSTEM → 403.',
+  description: 'Consente update solo per messaggi INTERNAL. PUBLIC/SYSTEM â†’ 403.',
 })
 @ApiParam({ name: 'reportId', description: 'ID del report' })
 @ApiParam({ name: 'messageId', description: 'ID del messaggio' })
@@ -259,9 +283,9 @@ updateMessageBody(
   return this.service.updateMessageBodyTenant(req, reportId, messageId, body);
 }
 
-  // DELETE — ELIMINA UNA SEGNALAZIONE COMPLETA
+  // DELETE â€” ELIMINA UNA SEGNALAZIONE COMPLETA
   @Delete(':reportId')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN')
   @ApiBearerAuth('access-token')
   @ApiOperation({
@@ -274,7 +298,7 @@ updateMessageBody(
 
   // AZIONE RAPIDA: Richiesta chiarimenti (set NEED_INFO + messaggio pubblico)
   @Post(':reportId/request-info')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({
@@ -297,7 +321,7 @@ updateMessageBody(
 
   // TENANT: Presign allegati (backoffice)
   @Post('attachments/presign')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Presign per upload allegati (backoffice, S3/MinIO)' })
@@ -367,7 +391,7 @@ updateMessageBody(
 
   // TENANT: Finalize allegati (backoffice)
   @Post('attachments/finalize')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Finalize upload allegati (backoffice): valida HMAC/ETag/size su TMP' })
@@ -411,10 +435,10 @@ updateMessageBody(
 
   // TENANT: collega allegati esistenti (in TMP) a un report
   @Post(':reportId/attachments')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Collega allegati caricati (TMP) al report', description: 'Idempotente: allegati già collegati sono riportati in existing.' })
+  @ApiOperation({ summary: 'Collega allegati caricati (TMP) al report', description: 'Idempotente: allegati giÃ  collegati sono riportati in existing.' })
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
   @ApiBody({ type: TenantAttachmentsLinkDto })
   attachToReport(@Req() req: Request, @Param('reportId') reportId: string, @Body() dto: TenantAttachmentsLinkDto) {
@@ -423,7 +447,7 @@ updateMessageBody(
 
   // TENANT: carica trascrizione manuale (nota INTERNAL)
   @Post(':reportId/voice/transcript')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Aggiunge una trascrizione audio (INTERNAL)', description: 'Crea un messaggio INTERNAL con il testo della trascrizione' })
@@ -435,8 +459,8 @@ updateMessageBody(
 
   // LOGS DI ACCESSO (ADMIN/AUDITOR)
   @Get(':reportId/logs')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'AUDITOR')
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Access log del report (view/export)' })
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
   getLogs(@Req() req: Request, @Param('reportId') reportId: string) {
@@ -445,8 +469,8 @@ updateMessageBody(
 
   // EXPORT PDF (ADMIN/AUDITOR)
   @Get(':reportId/export')
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'AUDITOR')
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @Roles('ADMIN')
   @ApiOperation({ summary: 'Esporta il report in PDF (engine MOCK/PDFKIT)' })
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
   @Header('Content-Type', 'application/pdf')
@@ -458,17 +482,17 @@ updateMessageBody(
 
   // ASSEGNAZIONI
   @Post(':reportId/assign/me')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Assegna a sé stessi il caso (se unassigned)', description: 'Race safe: fallisce se già assegnato' })
+  @ApiOperation({ summary: 'Assegna a sÃ© stessi il caso (se unassigned)', description: 'Race safe: fallisce se giÃ  assegnato' })
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
   assignMe(@Req() req: Request, @Param('reportId') reportId: string) {
     return this.service.assignMe(req, reportId);
   }
 
   @Post(':reportId/assign')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Assegna il caso a un altro utente (ADMIN)' })
@@ -480,10 +504,10 @@ updateMessageBody(
 
   // PRESA IN CARICO (solo assegnatario): promuove OPEN -> IN_PROGRESS (idempotente)
   @Post(':reportId/take')
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
-  @ApiOperation({ summary: 'Presa in carico del caso (solo assegnatario)', description: 'Aggiorna lo stato a IN_PROGRESS se attualmente OPEN. Idempotente se già IN_PROGRESS.' })
+  @ApiOperation({ summary: 'Presa in carico del caso (solo assegnatario)', description: 'Aggiorna lo stato a IN_PROGRESS se attualmente OPEN. Idempotente se giÃ  IN_PROGRESS.' })
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
   take(@Req() req: Request, @Param('reportId') reportId: string) {
     return this.service.take(req, reportId);
@@ -497,6 +521,58 @@ updateMessageBody(
   @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
   unassign(@Req() req: Request, @Param('reportId') reportId: string) {
     return this.service.unassign(req, reportId);
+  }
+
+  // ADMIN: gestisci assegnazioni AUDITOR
+  @Post(':reportId/auditors')
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Assegna un auditor al report (ADMIN)' })
+  @ApiBody({ schema: { type: 'object', properties: { auditorId: { type: 'string' } }, required: ['auditorId'] } })
+  assignAuditor(@Req() req: Request, @Param('reportId') reportId: string, @Body('auditorId') auditorId: string) {
+    return this.service.assignAuditor(req, reportId, auditorId);
+  }
+
+  @Delete(':reportId/auditors')
+  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Rimuove un auditor dal report (ADMIN)' })
+  @ApiBody({ schema: { type: 'object', properties: { auditorId: { type: 'string' } }, required: ['auditorId'] } })
+  unassignAuditor(@Req() req: Request, @Param('reportId') reportId: string, @Body('auditorId') auditorId: string) {
+    return this.service.unassignAuditor(req, reportId, auditorId);
+  }
+
+  // NOTE PERSONALI (solo autore) â€” non nella timeline, non esportate
+  @Get(':reportId/my-note')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Restituisce la nota personale dell\'utente corrente per il report (o null)' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  getMyNote(@Req() req: Request, @Param('reportId') reportId: string) {
+    return this.service.getMyNote(req, reportId);
+  }
+
+  @Put(':reportId/my-note')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Crea/Aggiorna la nota personale dell\'utente corrente per il report (max ~15KB)' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  upsertMyNote(@Req() req: Request, @Param('reportId') reportId: string, @Body() dto: MyNoteDto) {
+    return this.service.upsertMyNote(req, reportId, dto);
+  }
+
+  @Delete(':reportId/my-note')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'AGENT')
+  @ApiBearerAuth('access-token')
+  @ApiOperation({ summary: 'Elimina la propria nota personale per il report' })
+  @ApiParam({ name: 'reportId', description: 'ID della segnalazione' })
+  deleteMyNote(@Req() req: Request, @Param('reportId') reportId: string) {
+    return this.service.deleteMyNote(req, reportId);
   }
 }
 
