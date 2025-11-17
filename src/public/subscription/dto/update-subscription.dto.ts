@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsNumber, IsOptional, IsString, IsISO8601 } from 'class-validator';
-import { BillingCycle, ContractTerm, PaymentMethod, SubscriptionStatus } from '../../../generated/public';
+import { ContractTerm, InstallmentPlan, SubscriptionStatus } from '../../../generated/public';
 
 export class UpdateSubscriptionDto {
   @ApiPropertyOptional()
@@ -18,20 +18,20 @@ export class UpdateSubscriptionDto {
   @IsString()
   currency?: string;
 
-  @ApiPropertyOptional({ enum: BillingCycle, enumName: 'BillingCycle' })
-  @IsOptional()
-  @IsEnum(BillingCycle)
-  billingCycle?: BillingCycle;
-
   @ApiPropertyOptional({ enum: ContractTerm, enumName: 'ContractTerm' })
   @IsOptional()
   @IsEnum(ContractTerm)
   contractTerm?: ContractTerm;
 
-  @ApiPropertyOptional({ enum: PaymentMethod, enumName: 'PaymentMethod' })
+  @ApiPropertyOptional({ description: 'SubscriptionPlan id' })
   @IsOptional()
-  @IsEnum(PaymentMethod)
-  paymentMethod?: PaymentMethod;
+  @IsString()
+  subscriptionPlanId?: string;
+
+  @ApiPropertyOptional({ enum: InstallmentPlan, enumName: 'InstallmentPlan' })
+  @IsOptional()
+  @IsEnum(InstallmentPlan)
+  installmentPlan?: InstallmentPlan;
 
   @ApiPropertyOptional({ enum: SubscriptionStatus, enumName: 'SubscriptionStatus' })
   @IsOptional()
@@ -51,10 +51,5 @@ export class UpdateSubscriptionDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsISO8601()
-  trialEndsAt?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsISO8601()
-  canceledAt?: string;
+  endsAt?: string;
 }

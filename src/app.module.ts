@@ -20,6 +20,8 @@ import { CasePolicyModule } from './tenant/case-policy/case-policy.module';
 import { TemplatesModule } from './tenant/templates/templates.module';
 import { BillingModule } from './tenant/billing/billing.module';
 import { RateLimitFilter } from './common/filters/rate-limit.filter';
+import { SubscriptionGuard } from './common/guards/subscription.guard';
+import { TenantModule } from './tenant/tenant.module';
 
 const nodeEnv = (process.env.NODE_ENV || 'development').toLowerCase();
 const envFilePath = (
@@ -46,6 +48,7 @@ const envFilePath = (
         limit: 20,
       },
     ]),
+    TenantModule,
     PlatformModule,
     PublicAuthModule,
     PublicReportModule,
@@ -65,6 +68,7 @@ const envFilePath = (
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: SubscriptionGuard },
     { provide: APP_FILTER, useClass: RateLimitFilter },
   ],
 })

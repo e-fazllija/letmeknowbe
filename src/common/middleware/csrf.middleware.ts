@@ -23,9 +23,10 @@ export function csrfMiddleware(req: Request, res: Response, next: NextFunction) 
     });
   }
 
-  // Skip safe methods and refresh endpoint
+  // Skip safe methods and refresh/webhook endpoints
   if (!PROTECTED_METHODS.has((req.method || 'GET').toUpperCase())) return next();
   const url = req.originalUrl || req.url || '';
+  if (url.includes('/v1/public/stripe/webhook')) return next();
   if (url.includes('/v1/tenant/auth/refresh')) return next();
 
   const header = (req.headers['x-csrf-token'] as string) || '';

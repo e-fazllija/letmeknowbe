@@ -2,7 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
-import { json, urlencoded } from 'express';
+import { json, urlencoded, raw } from 'express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import * as crypto from 'crypto';
@@ -33,6 +33,9 @@ async function bootstrap() {
   // Hardening base
   app.use(helmet());
   app.use(cookieParser());
+
+  // Raw body for Stripe webhook signature verification
+  app.use('/v1/public/stripe/webhook', raw({ type: 'application/json' }));
 
   // Body size limits (allegati via presign, non via body)
   app.use(json({ limit: '1mb' }));

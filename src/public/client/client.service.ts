@@ -14,6 +14,7 @@ import {
   Prisma as PublicPrisma,
   ClientStatus,
   SubscriptionStatus,
+  InstallmentPlan,
 } from '../../generated/public';
 import * as crypto from 'crypto';
 
@@ -68,34 +69,28 @@ export class ClientService {
     }
 
     try {
-      // 2) Crea Subscription nel PUBLIC
-      const subData: PublicPrisma.SubscriptionCreateInput = {
-        client: { connect: { id: createdClient.id } },
-        amount: new PublicPrisma.Decimal(dto.subscription.amount),
-        currency: dto.subscription.currency ?? 'EUR',
-        billingCycle: dto.subscription.billingCycle,
-        contractTerm: dto.subscription.contractTerm,
-        method: dto.subscription.paymentMethod,
-        status: dto.subscription.status ?? SubscriptionStatus.ACTIVE, //  runtime enum
+      // 2) Assicurati che esista un SubscriptionPlan (usa quello passato dal DTO)
+      const plan = await this.publicPrisma.subscriptionPlan.findUnique({ where: { id: dto.subscription.subscriptionPlanId } });
+      if (!plan) throw new BadRequestException('subscriptionPlanId non valido');
 
-        startsAt: dto.subscription.startsAt
-          ? new Date(dto.subscription.startsAt)
-          : undefined,
-        nextBillingAt: dto.subscription.nextBillingAt
-          ? new Date(dto.subscription.nextBillingAt)
-          : undefined,
-        trialEndsAt: dto.subscription.trialEndsAt
-          ? new Date(dto.subscription.trialEndsAt)
-          : undefined,
-        canceledAt: dto.subscription.canceledAt
-          ? new Date(dto.subscription.canceledAt)
-          : undefined,
-      };
-
-      const sub = await this.publicPrisma.subscription.create({ data: subData });
+      // 3) Crea Subscription nel PUBLIC (schema aggiornato)
+      const sub = await this.publicPrisma.subscription.create({
+        data: {
+          client: { connect: { id: createdClient.id } },
+          plan: { connect: { id: plan.id } },
+          amount: new PublicPrisma.Decimal(dto.subscription.amount),
+          currency: dto.subscription.currency ?? 'EUR',
+          contractTerm: dto.subscription.contractTerm,
+          installmentPlan: dto.subscription.installmentPlan ?? (InstallmentPlan.ONE_SHOT as any),
+          status: dto.subscription.status ?? SubscriptionStatus.ACTIVE,
+          startsAt: dto.subscription.startsAt ? new Date(dto.subscription.startsAt) : undefined,
+          nextBillingAt: dto.subscription.nextBillingAt ? new Date(dto.subscription.nextBillingAt) : undefined,
+          endsAt: dto.subscription.endsAt ? new Date(dto.subscription.endsAt) : undefined,
+        },
+      });
       createdSub = { id: sub.id };
 
-      // 3) Replica nel TENANT (shadow minimal)
+      // 4) Replica nel TENANT (shadow minimal)
       await this.tenantPrisma.client.upsert({
         where: { id: createdClient.id },
         update: {
@@ -113,15 +108,43 @@ export class ClientService {
         },
       });
 
+      // 4b) Inizializza BillingProfile nel TENANT usando i dati PUBLIC
+      await (this.tenantPrisma as any).billingProfile.upsert({
+        where: { clientId: createdClient.id },
+        update: {},
+        create: {
+          clientId: createdClient.id,
+          companyName: clientData.companyName,
+          taxId: dto.client.billing.billingTaxId,
+          address: dto.client.billing.billingAddressLine1,
+          zip: dto.client.billing.billingZip,
+          city: dto.client.billing.billingCity,
+          province: dto.client.billing.billingProvince,
+          country: dto.client.billing.billingCountry,
+          billingEmail: dto.client.billing.billingEmail,
+        },
+      });
+
+      // Replica/Upsert anche il piano nel TENANT per coerenza
+      await this.tenantPrisma.subscriptionPlan.upsert({
+        where: { id: plan.id },
+        update: { name: plan.name, description: plan.description ?? undefined, price: plan.price as any, currency: plan.currency, billingCycle: plan.billingCycle as any, active: plan.active },
+        create: { id: plan.id, name: plan.name, description: plan.description ?? undefined, price: plan.price as any, currency: plan.currency, billingCycle: plan.billingCycle as any, active: plan.active },
+      });
+
       await this.tenantPrisma.subscription.create({
         data: {
           id: sub.id, // stesso id per correlazione
           clientId: createdClient.id,
-          billingCycle: sub.billingCycle,
+          subscriptionPlanId: plan.id,
+          amount: sub.amount as any,
+          currency: sub.currency,
+          installmentPlan: sub.installmentPlan as any,
           contractTerm: sub.contractTerm,
           status: sub.status as any,
           startsAt: sub.startsAt,
           nextBillingAt: sub.nextBillingAt ?? undefined,
+          endsAt: sub.endsAt ?? undefined,
         },
       });
 

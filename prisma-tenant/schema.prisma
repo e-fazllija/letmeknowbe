@@ -75,6 +75,21 @@ enum SubscriptionStatus {
   EXPIRED
 }
 
+// 🔹 NUOVO: piano di rateizzazione (allineato a INTENT)
+enum InstallmentPlan {
+  ONE_SHOT     // pagamento annuale in un'unica soluzione
+  SEMESTRALE   // 2 rate (ogni 6 mesi)
+  TRIMESTRALE  // 4 rate (ogni 3 mesi)
+}
+
+// 🔹 NUOVO: stato del singolo pagamento (allineato a INTENT)
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
 // --- NEW: User/Invite/Session enums ---
 enum UserStatus {
   INVITED
@@ -92,6 +107,28 @@ enum UserTokenType {
   INVITE
   RESET
   VERIFY
+}
+
+// Visibilità dei messaggi
+enum MessageVisibility {
+  PUBLIC
+  INTERNAL
+  SYSTEM
+}
+
+// Stato allegati durante pipeline di scan/promozione
+enum AttachmentStatus {
+  UPLOADED
+  SCANNING
+  CLEAN
+  INFECTED
+}
+
+// Preferenza deduplica lookups per il form pubblico
+enum LookupPreference {
+  PREFER_TENANT
+  PREFER_GLOBAL
+  SHOW_ALL
 }
 
 ////////////////////////////////////////////////////
@@ -138,26 +175,139 @@ model Client {
   contactEmail  String
   status        ClientStatus   @default(ACTIVE)
   employeeRange EmployeeRange
+
+  // 🔹 Stripe Customer id (allineato con INTENT)
+  stripeCustomerId String? @unique
+
+  // Relazioni billing
   subscriptions Subscription[]
+  payments      Payment[]
+
+  // Relazioni applicative
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
   @@index([companyName])
 }
 
-// Abbonamenti (shadow minimale nel tenant: NO dati economici)
+// 🔹 NUOVO: Piano di abbonamento (shadow nel tenant, allineato con INTENT)
+model SubscriptionPlan {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+
+  // prezzo "annuale" del piano
+  price       Decimal  @db.Decimal(10, 2)
+  currency    String   @default("EUR")
+
+  // nel vostro caso l’uso è annuale
+  billingCycle BillingCycle @default(ANNUALE)
+
+  active      Boolean  @default(true)
+
+  // opzionale: info Stripe per mostrare in UI del tenant
+  stripeProductId      String?
+  stripePriceOneShotId String?
+  stripePriceSemiId    String?
+  stripePriceQuarterId String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  subscriptions Subscription[]
+}
+
+// 🔹 NUOVO: Abbonamenti (billing completo nel tenant, allineato a INTENT)
 model Subscription {
-  id            String             @id @default(cuid())
-  clientId      String
-  client        Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  billingCycle  BillingCycle
-  contractTerm  ContractTerm
-  status        SubscriptionStatus @default(ACTIVE)
-  startsAt      DateTime           @default(now())
+  id        String   @id @default(cuid())
+
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  subscriptionPlanId String
+  plan               SubscriptionPlan @relation(fields: [subscriptionPlanId], references: [id])
+
+  status       SubscriptionStatus @default(ACTIVE)
+  contractTerm ContractTerm?      // ONE_YEAR / THREE_YEARS se serve
+
+  // Come paga il piano annuale
+  installmentPlan InstallmentPlan @default(ONE_SHOT)
+
+  // Periodo coperto da questo contratto
+  startsAt      DateTime @default(now())
+  endsAt        DateTime?
   nextBillingAt DateTime?
-  createdAt     DateTime           @default(now())
+
+  // Importo totale del contratto (annuale) per questo cliente
+  amount   Decimal @db.Decimal(10, 2)
+  currency String  @default("EUR")
+
+  // Stripe (shadow, solo lettura dal punto di vista del tenant)
+  stripeSubscriptionId String?
+  stripeCustomerId     String?
+
+  // Ultimo pagamento riuscito (per lookup veloce)
+  lastPaymentId String?
+  lastPayment   Payment? @relation("TenantSubscriptionLastPayment", fields: [lastPaymentId], references: [id])
+
+  // Tutti i pagamenti associati
+  payments Payment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([clientId])
+}
+
+// 🔹 NUOVO: Pagamenti (rate o pagamento unico) nel tenant
+model Payment {
+  id          String   @id @default(cuid())
+
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  amount      Decimal  @db.Decimal(10, 2)
+  currency    String   @default("EUR")
+
+  status      PaymentStatus @default(PENDING)
+  method      PaymentMethod // CARTA / BONIFICO
+
+  dueDate     DateTime?      // scadenza rata
+  paymentDate DateTime?      // data pagamento effettivo
+
+  // Stripe refs (shadow)
+  stripePaymentIntentId String?
+  stripeInvoiceId       String?
+  stripeChargeId        String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // back-relation per Subscription.lastPayment
+  lastPaymentOf Subscription[] @relation("TenantSubscriptionLastPayment")
+
+  @@index([clientId])
+  @@index([subscriptionId])
+}
+
+// 🔹 NUOVO: Log eventi Stripe (shadow nel tenant)
+model StripeWebhookEvent {
+  id          String   @id @default(cuid())
+  eventId     String   @unique        // ID evento Stripe: "evt_..."
+  type        String                 // es. "invoice.payment_succeeded"
+  data        String?                // payload JSON (se vuoi salvarlo)
+  receivedAt  DateTime @default(now())
+  processed   Boolean  @default(false)
+  processedAt DateTime?
+  error       String?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type, processed])
 }
 
 // Utenti interni (admin, agent)
@@ -292,13 +442,6 @@ model ReportMessage {
   @@index([clientId])
   @@index([reportId, createdAt])
   @@index([reportId, visibility])
-}
-
-// Visibilità dei messaggi
-enum MessageVisibility {
-  PUBLIC
-  INTERNAL
-  SYSTEM
 }
 
 // Storico cambi di stato
@@ -444,21 +587,6 @@ model ReportAccessLog {
   @@index([reportId, createdAt])
   @@index([userId, createdAt])
   @@index([clientId, createdAt])
-}
-
-// Stato allegati durante pipeline di scan/promozione
-enum AttachmentStatus {
-  UPLOADED
-  SCANNING
-  CLEAN
-  INFECTED
-}
-
-// Preferenza deduplica lookups per il form pubblico
-enum LookupPreference {
-  PREFER_TENANT
-  PREFER_GLOBAL
-  SHOW_ALL
 }
 
 // Case policy per-tenant (impostazioni)

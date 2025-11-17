@@ -34,21 +34,20 @@ export class BillingService {
 
   async getSubscription(clientId: string) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
-    const sub = await (this.prisma as any).subscription.findFirst({ where: { clientId }, orderBy: { createdAt: 'desc' } });
-    if (!sub) return { plan: 'BASIC', cycle: 'MENSILE', status: 'ACTIVE' };
-    return { plan: 'BASIC', cycle: sub.billingCycle, status: sub.status, startsAt: sub.startsAt, nextBillingAt: sub.nextBillingAt };
+    const sub = await (this.prisma as any).subscription.findFirst({ where: { clientId }, orderBy: { createdAt: 'desc' }, include: { plan: true } });
+    if (!sub) return { plan: 'BASIC', cycle: 'ANNUALE', status: 'ACTIVE' };
+    return { plan: sub.plan?.name || 'BASIC', cycle: sub.plan?.billingCycle || 'ANNUALE', status: sub.status, startsAt: sub.startsAt, nextBillingAt: sub.nextBillingAt };
   }
 
   async updateSubscription(clientId: string, body: any) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
     const existing = await (this.prisma as any).subscription.findFirst({ where: { clientId }, orderBy: { createdAt: 'desc' } });
     const data: any = {};
-    if (typeof body?.cycle === 'string') data.billingCycle = body.cycle as any;
     if (typeof body?.status === 'string') data.status = body.status as any;
     if (existing) {
       return (this.prisma as any).subscription.update({ where: { id: existing.id }, data });
     } else {
-      return (this.prisma as any).subscription.create({ data: { clientId, billingCycle: (data.billingCycle || 'MENSILE') as any, contractTerm: 'ONE_YEAR' as any, status: (data.status || 'ACTIVE') as any } });
+      throw new BadRequestException('Nessuna subscription esistente per il tenant');
     }
   }
 
