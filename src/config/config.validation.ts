@@ -66,4 +66,9 @@ export const validationSchema = Joi.object({
   // Export PDF
   EXPORT_PDF_ENABLED: Joi.boolean().truthy('true', '1').falsy('false', '0').default(true),
   PDF_ENGINE: Joi.string().valid('MOCK', 'PDFKIT').default('MOCK'),
+
+  // Stripe (opzionale - se vuoti l'integrazione reale è disabilitata)
+  STRIPE_SECRET_KEY: Joi.string().allow('', null),
+  STRIPE_WEBHOOK_SECRET: Joi.string().allow('', null),
+  STRIPE_API_VERSION: Joi.string().allow('', null),
 });

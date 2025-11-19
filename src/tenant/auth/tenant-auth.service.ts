@@ -347,8 +347,9 @@ export class TenantAuthService {
     amr: string[],
     options: { mfaAt?: Date } = {},
   ): Promise<LoginSuccessResult> {
+    const subClaims = await this.buildSubscriptionClaims(user.clientId);
     const accessToken = this.issueAccessToken(
-      { sub: user.id, clientId: user.clientId, role: user.role },
+      { sub: user.id, clientId: user.clientId, role: user.role, ...subClaims },
       amr,
       options.mfaAt,
     );
@@ -369,13 +370,14 @@ export class TenantAuthService {
     };
   }
 
-  private issueAccessToken(payload: { sub: string; clientId: string; role: string }, amr: string[], mfaAt?: Date) {
+  private issueAccessToken(
+    payload: { sub: string; clientId: string; role: string; subStatus?: string; subEndsAt?: number },
+    amr: string[],
+    mfaAt?: Date,
+  ) {
     const ttl = process.env.ACCESS_TTL || '900s';
     const expiresIn = Math.floor(this.ttlToMs(ttl) / 1000);
-    const tokenPayload: Record<string, any> = {
-      ...payload,
-      amr,
-    };
+    const tokenPayload: Record<string, any> = { ...payload, amr };
     if (mfaAt) {
       tokenPayload.mfaAt = Math.floor(mfaAt.getTime() / 1000);
     }
@@ -441,8 +443,9 @@ export class TenantAuthService {
     });
     const role = user?.role || 'ADMIN';
     const amr = user?.mfaEnabled ? ['pwd', 'mfa'] : ['pwd'];
+    const subClaims = await this.buildSubscriptionClaims(session.clientId);
     const accessToken = this.issueAccessToken(
-      { sub: session.userId, clientId: session.clientId, role },
+      { sub: session.userId, clientId: session.clientId, role, ...subClaims },
       amr,
       user?.mfaEnabled ? new Date() : undefined,
     );
@@ -525,6 +528,28 @@ export class TenantAuthService {
       default:
         return ['REPORTS_VIEW'];
     }
+  }
+
+  private async buildSubscriptionClaims(clientId: string): Promise<{ subStatus?: string; subEndsAt?: number }> {
+    if (!clientId) return {};
+    const now = new Date();
+    const sub = await (this.prisma as any).subscription.findFirst({
+      where: {
+        clientId,
+        status: { in: ['ACTIVE', 'TRIALING'] },
+        OR: [{ endsAt: null }, { endsAt: { gt: now } }],
+      },
+      orderBy: { startsAt: 'desc' },
+      select: { status: true, endsAt: true },
+    });
+    if (!sub) return {};
+    const status = (sub.status as string) || undefined;
+    const endsAt: Date | null | undefined = sub.endsAt as any;
+    const endsAtEpoch = endsAt ? Math.floor(endsAt.getTime() / 1000) : undefined;
+    const claims: { subStatus?: string; subEndsAt?: number } = {};
+    if (status) claims.subStatus = status;
+    if (endsAtEpoch !== undefined) claims.subEndsAt = endsAtEpoch;
+    return claims;
   }
 }
 

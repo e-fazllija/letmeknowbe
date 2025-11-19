@@ -12,6 +12,7 @@ import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
 import {
   Prisma as PublicPrisma,
   SubscriptionStatus,
+  ContractTerm,
 } from '../../generated/public';
 
 @Injectable()
@@ -31,6 +32,19 @@ export class SubscriptionService {
       const plan = await this.prismaPublic.subscriptionPlan.findUnique({ where: { id: dto.subscriptionPlanId } });
       if (!plan) throw new BadRequestException('subscriptionPlanId non valido');
 
+      // Calcola periodo contrattuale (annualità evolutiva)
+      const startsAt = dto.startsAt ? new Date(dto.startsAt) : new Date();
+      let endsAt: Date | undefined;
+      if (dto.endsAt) {
+        endsAt = new Date(dto.endsAt);
+      } else {
+        const base = new Date(startsAt);
+        const term = dto.contractTerm ?? ContractTerm.ONE_YEAR;
+        const years = term === ContractTerm.THREE_YEARS ? 3 : 1;
+        base.setFullYear(base.getFullYear() + years);
+        endsAt = base;
+      }
+
       const publicSub = await this.prismaPublic.subscription.create({
         data: {
           client: { connect: { id: dto.clientId } },
@@ -40,9 +54,9 @@ export class SubscriptionService {
           contractTerm: dto.contractTerm,
           installmentPlan: dto.installmentPlan,
           status: dto.status ?? SubscriptionStatus.ACTIVE,
-          startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
+          startsAt,
           nextBillingAt: dto.nextBillingAt ? new Date(dto.nextBillingAt) : undefined,
-          endsAt: dto.endsAt ? new Date(dto.endsAt) : undefined,
+          endsAt,
         },
       });
 

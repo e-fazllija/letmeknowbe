@@ -15,6 +15,7 @@ import {
   ClientStatus,
   SubscriptionStatus,
   InstallmentPlan,
+  ContractTerm,
 } from '../../generated/public';
 import * as crypto from 'crypto';
 
@@ -70,8 +71,23 @@ export class ClientService {
 
     try {
       // 2) Assicurati che esista un SubscriptionPlan (usa quello passato dal DTO)
-      const plan = await this.publicPrisma.subscriptionPlan.findUnique({ where: { id: dto.subscription.subscriptionPlanId } });
+      const plan = await this.publicPrisma.subscriptionPlan.findUnique({
+        where: { id: dto.subscription.subscriptionPlanId },
+      });
       if (!plan) throw new BadRequestException('subscriptionPlanId non valido');
+
+      // Calcola periodo contrattuale (annualità evolutiva)
+      const startsAt = dto.subscription.startsAt ? new Date(dto.subscription.startsAt) : new Date();
+      let endsAt: Date | undefined;
+      if (dto.subscription.endsAt) {
+        endsAt = new Date(dto.subscription.endsAt);
+      } else {
+        const base = new Date(startsAt);
+        const term = dto.subscription.contractTerm ?? ContractTerm.ONE_YEAR;
+        const years = term === ContractTerm.THREE_YEARS ? 3 : 1;
+        base.setFullYear(base.getFullYear() + years);
+        endsAt = base;
+      }
 
       // 3) Crea Subscription nel PUBLIC (schema aggiornato)
       const sub = await this.publicPrisma.subscription.create({
@@ -83,9 +99,9 @@ export class ClientService {
           contractTerm: dto.subscription.contractTerm,
           installmentPlan: dto.subscription.installmentPlan ?? (InstallmentPlan.ONE_SHOT as any),
           status: dto.subscription.status ?? SubscriptionStatus.ACTIVE,
-          startsAt: dto.subscription.startsAt ? new Date(dto.subscription.startsAt) : undefined,
+          startsAt,
           nextBillingAt: dto.subscription.nextBillingAt ? new Date(dto.subscription.nextBillingAt) : undefined,
-          endsAt: dto.subscription.endsAt ? new Date(dto.subscription.endsAt) : undefined,
+          endsAt,
         },
       });
       createdSub = { id: sub.id };

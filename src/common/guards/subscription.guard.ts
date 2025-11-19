@@ -44,6 +44,24 @@ export class SubscriptionGuard implements CanActivate {
     const clientId = user?.clientId as string | undefined;
     if (!clientId) return true; // let route guards handle auth
 
+    // Fast-path: prova a usare i claim nel token (subStatus/subEndsAt)
+    const rawStatus = (user?.subStatus as string | undefined) || undefined;
+    const status = rawStatus ? rawStatus.toUpperCase() : undefined;
+    const rawEndsAt = user?.subEndsAt;
+    const endsAtSec = typeof rawEndsAt === 'number' ? rawEndsAt : undefined;
+
+    if (status) {
+      const active = status === 'ACTIVE' || status === 'TRIALING';
+      const nowSec = Math.floor(Date.now() / 1000);
+      const notExpired = endsAtSec === undefined || endsAtSec > nowSec;
+      if (!active || !notExpired) {
+        throw new ForbiddenException('Abbonamento scaduto o inattivo');
+      }
+      // Token dice che la sottoscrizione è ok: accetta senza query DB
+      return true;
+    }
+
+    // Fallback: controlla dal DB (per token vecchi o senza claim)
     const now = new Date();
     const sub = await (this.prisma as any).subscription.findFirst({
       where: {
@@ -62,4 +80,3 @@ export class SubscriptionGuard implements CanActivate {
     return true;
   }
 }
-
