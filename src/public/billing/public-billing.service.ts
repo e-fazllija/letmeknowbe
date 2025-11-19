@@ -105,8 +105,10 @@ export class PublicBillingService {
       process.env.API_BASE_URL ||
       'http://localhost:3000';
 
-    const successUrl = `${baseUrl.replace(/\/+$/, '')}/billing/success?session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = `${baseUrl.replace(/\/+$/, '')}/billing/canceled`;
+    // HashRouter nel FE: includi #/ per far montare correttamente la route
+    const baseClean = baseUrl.replace(/\/+$/, '');
+    const successUrl = `${baseClean}/#/billing/success?session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${baseClean}/#/billing/canceled`;
 
     try {
       const session = await this.stripe.sdk.checkout.sessions.create({
