@@ -9,6 +9,11 @@ function isTrue(v?: string) {
 export class NotificationsService {
   constructor(private prisma: PrismaTenantService) {}
 
+  private isInviteEmailEnabled(): boolean {
+    const v = String(process.env.INVITE_EMAIL_ENABLED || '').toLowerCase();
+    return v === 'true' || v === '1';
+  }
+
   private frontendBase(): string | undefined {
     const base = (process.env.FRONTEND_BASE_URL || '').trim();
     if (!base) return undefined;
@@ -166,4 +171,68 @@ export class NotificationsService {
     ].filter(Boolean) as string[];
     await this.deliver([toEmail], subject, textLines.join('\n'));
   }
+
+    async sendOwnerInvite(params: {
+    email: string;
+    activationUrl: string;
+    expiresAt: Date;
+    tenantName?: string;
+  }): Promise<void> {
+    const { email, activationUrl, expiresAt, tenantName } = params;
+
+    if (!this.isInviteEmailEnabled()) {
+      // Dev-mode: log sintetico, nessuna email reale
+      // eslint-disable-next-line no-console
+      console.info('[invite] owner email disabled', { email, activationUrl });
+      return;
+    }
+
+    const subject = 'Attiva il tuo account LetMeKnow';
+    const lines = [
+      'Ciao,',
+      '',
+      `hai appena registrato l\'azienda ${tenantName || 'LetMeKnow'}.`,
+      'Per attivare il tuo account amministratore, clicca sul seguente link o copialo nel browser:',
+      activationUrl,
+      '',
+      `Il link di attivazione scade il ${expiresAt.toISOString()}.`,
+      '',
+      'Se non hai richiesto tu questa registrazione, puoi ignorare questa email.',
+    ];
+
+    await this.deliver([email], subject, lines.join('\n'));
+  }
+
+  async sendUserInvite(params: {
+    email: string;
+    activationUrl: string;
+    expiresAt: Date;
+    tenantName?: string;
+    role?: string;
+  }): Promise<void> {
+    const { email, activationUrl, expiresAt, tenantName, role } = params;
+
+    if (!this.isInviteEmailEnabled()) {
+      // eslint-disable-next-line no-console
+      console.info('[invite] user email disabled', { email, activationUrl });
+      return;
+    }
+
+    const roleLabel = (role || 'utente').toString().toUpperCase();
+    const subject = 'Sei stato invitato su LetMeKnow';
+    const lines = [
+      'Ciao,',
+      '',
+      `sei stato invitato come ${roleLabel} per l\'azienda ${tenantName || 'LetMeKnow'}.`,
+      'Per attivare il tuo account, clicca sul seguente link o copialo nel browser:',
+      activationUrl,
+      '',
+      `Il link di attivazione scade il ${expiresAt.toISOString()}.`,
+      '',
+      'Se non ti aspettavi questa email, puoi ignorarla.',
+    ];
+
+    await this.deliver([email], subject, lines.join('\n'));
+  }
+
 }

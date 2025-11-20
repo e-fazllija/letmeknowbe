@@ -6,10 +6,14 @@ import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 import { UserStatus } from '../../generated/tenant';
 import { InviteUserDto } from './dto/invite-user.dto';
+import { NotificationsService } from '../../common/notifications/notifications.service';
+
 
 @Injectable()
 export class UserService {
-  constructor(private prisma: PrismaTenantService) {}
+  constructor(private prisma: PrismaTenantService,
+    private notify: NotificationsService,
+  ) {}
 
   async createForClient(clientId: string, dto: CreateUserDto) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
@@ -166,7 +170,7 @@ export class UserService {
       },
     });
 
-    // Dev convenience: log activation link (do not persist raw token)
+        // Dev convenience: log activation link (do not persist raw token)
     try {
       const frontendBase = (process.env.FRONTEND_BASE_URL || '').trim().replace(/\/$/, '');
       const apiBase = (process.env.API_BASE_URL || '').trim().replace(/\/$/, '');
@@ -177,6 +181,26 @@ export class UserService {
       const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
       const exposeUrl = String(process.env.INVITE_EXPOSE_URL || (isProd ? 'false' : 'true')).toLowerCase() === 'true';
       const exposeToken = String(process.env.INVITE_EXPOSE_TOKEN || (isProd ? 'false' : 'false')).toLowerCase() === 'true';
+
+      // Invio email di invito (o solo log in base a INVITE_EMAIL_ENABLED/SMTP)
+      if (activationUrl) {
+        try {
+          const tenantName = await this.prisma.client.findUnique({
+            where: { id: clientId },
+            select: { companyName: true },
+          });
+          await this.notify.sendUserInvite({
+            email,
+            activationUrl,
+            expiresAt,
+            tenantName: tenantName?.companyName,
+            role: dto.role,
+          });
+        } catch {
+          // notifiche non devono bloccare l'invito
+        }
+      }
+
       if (activationUrl && exposeUrl) {
         // eslint-disable-next-line no-console
         console.info('[invite] activation link', { email, expiresAt: expiresAt.toISOString(), activationUrl });
@@ -186,6 +210,7 @@ export class UserService {
         }
       }
     } catch {}
+
 
     // TODO: invio email reale con (selector, rawToken) quando SMTP è configurato
     return { userId: user.id };

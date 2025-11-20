@@ -10,10 +10,13 @@ import { PrismaTenantService } from './../../tenant/prisma-tenant.service';
 // Modulo Tenant (importante per poter iniettare PrismaTenantService)
 import { TenantModule } from './../../tenant/tenant.module';
 import { PlatformOptionalGuard } from '../../platform/guards/platform-optional.guard';
+import { NotificationsModule } from 'common/notifications/notifications.module';
+
 
 @Module({
   imports: [
     TenantModule,
+    NotificationsModule,
     JwtModule.register({}),
   ],
   controllers: [

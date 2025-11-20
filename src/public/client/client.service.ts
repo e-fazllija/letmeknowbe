@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { PrismaPublicService } from '../prisma-public.service';
 import { PrismaTenantService } from './../../tenant/prisma-tenant.service';
+import { NotificationsService } from '../../common/notifications/notifications.service';
+
 
 //  Import robusto dal client generato:
 // - PublicPrisma = namespace con i TIPI (PublicPrisma.ClientStatus, .Decimal, …)
@@ -28,6 +30,7 @@ export class ClientService {
   constructor(
     private publicPrisma: PrismaPublicService,
     private tenantPrisma: PrismaTenantService,
+    private notify: NotificationsService,
   ) {}
 
   /**
@@ -200,7 +203,20 @@ export class ClientService {
       const activationUrl = frontendBase
         ? `${frontendBase}/activate?selector=${encodeURIComponent(selector)}&token=${encodeURIComponent(tokenPlain)}`
         : `${apiBase}/public/auth/activate?selector=${encodeURIComponent(selector)}&token=${encodeURIComponent(tokenPlain)}`;
-      // In ambiente locale, logga il link di attivazione (in produzione invio e-mail)
+
+      // Invio email di invito (o solo log in base alla config)
+      try {
+        await this.notify.sendOwnerInvite({
+          email: invited.email,
+          activationUrl,
+          expiresAt,
+          tenantName: clientData.companyName,
+        });
+      } catch {
+        // notifiche non devono bloccare il signup
+      }
+
+      // In ambiente locale, logga il link di attivazione
       // eslint-disable-next-line no-console
       console.log(`[Signup] Activation link for ${invited.email}: ${activationUrl}`);
 
@@ -215,6 +231,7 @@ export class ClientService {
           ...(exposeUrl ? { activationUrl } : {}),
         },
       };
+
     } catch (e: any) {
       // COMPENSAZIONE PUBLIC in caso fallisca la replica TENANT o la creazione sub
       try {

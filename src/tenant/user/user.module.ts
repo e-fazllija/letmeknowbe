@@ -6,9 +6,10 @@ import { PrismaTenantService } from '../prisma-tenant.service';
 import { TenantModule } from '../tenant.module';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { NotificationsModule } from '../../common/notifications/notifications.module'; 
 
 @Module({
-  imports: [TenantModule, JwtModule.register({})],
+  imports: [TenantModule, JwtModule.register({}), NotificationsModule],
   controllers: [UserController],
   providers: [UserService, JwtAuthGuard, RolesGuard],
   exports: [UserService]
