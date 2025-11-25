@@ -45,7 +45,8 @@ export class ClientService {
       companyName: dto.client.companyName,
       contactEmail: dto.client.contactEmail,
       employeeRange: dto.client.employeeRange,
-      status: dto.client.status ?? ClientStatus.ACTIVE, //  runtime enum
+      // Nuovi tenant creati sempre in PENDING_PAYMENT fino al primo pagamento
+      status: ClientStatus.PENDING_PAYMENT,
 
       // Billing (fonte di verità in PUBLIC)
       billingTaxId: dto.client.billing.billingTaxId,
@@ -101,7 +102,8 @@ export class ClientService {
           currency: dto.subscription.currency ?? 'EUR',
           contractTerm: dto.subscription.contractTerm,
           installmentPlan: dto.subscription.installmentPlan ?? (InstallmentPlan.ONE_SHOT as any),
-          status: dto.subscription.status ?? SubscriptionStatus.ACTIVE,
+          // Stato iniziale: PENDING_PAYMENT fino al primo pagamento riuscito
+          status: SubscriptionStatus.PENDING_PAYMENT,
           startsAt,
           nextBillingAt: dto.subscription.nextBillingAt ? new Date(dto.subscription.nextBillingAt) : undefined,
           endsAt,
@@ -233,6 +235,12 @@ export class ClientService {
       };
 
     } catch (e: any) {
+      // Log esteso per capire la causa del 500 in signup
+      try {
+        // eslint-disable-next-line no-console
+        console.error('[signupOrchestrated] error', e);
+      } catch {}
+
       // COMPENSAZIONE PUBLIC in caso fallisca la replica TENANT o la creazione sub
       try {
         if (createdSub?.id) {

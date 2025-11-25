@@ -7,8 +7,12 @@ import {
   PaymentMethod as PublicPaymentMethod,
   PaymentStatus as PublicPaymentStatus,
   SubscriptionStatus as PublicSubscriptionStatus,
+  ClientStatus as PublicClientStatus,
 } from '../../generated/public';
-import { SubscriptionStatus as TenantSubscriptionStatus } from '../../generated/tenant';
+import {
+  SubscriptionStatus as TenantSubscriptionStatus,
+  ClientStatus as TenantClientStatus,
+} from '../../generated/tenant';
 
 @Injectable()
 export class StripeWebhookService {
@@ -369,21 +373,33 @@ export class StripeWebhookService {
       });
     }
 
-    // Aggiorna Subscription.lastPaymentId (se esiste una subscription)
+    // Aggiorna Subscription.lastPaymentId (se esiste una subscription) e, se era PENDING_PAYMENT, promuovi ad ACTIVE
     if (subscription) {
       const nextBillingAt =
         invoice.next_payment_attempt != null
           ? new Date(invoice.next_payment_attempt * 1000)
           : subscription.nextBillingAt;
 
+      const wasPending =
+        subscription.status === PublicSubscriptionStatus.PENDING_PAYMENT ||
+        (typeof subscription.status === 'string' &&
+          subscription.status.toUpperCase() === 'PENDING_PAYMENT');
+
+      const updateSubData: any = {
+        lastPaymentId: publicPayment.id,
+        status: PublicSubscriptionStatus.ACTIVE,
+        nextBillingAt,
+      };
+
+      // Prima attivazione: valorizza firstPaidAt una sola volta
+      if (wasPending && !subscription.firstPaidAt) {
+        updateSubData.firstPaidAt = paymentDate ?? new Date();
+      }
+
       const publicSubUpdated = await (this.prismaPublic as any).subscription.update(
         {
           where: { id: subscription.id },
-          data: {
-            lastPaymentId: publicPayment.id,
-            status: PublicSubscriptionStatus.ACTIVE,
-            nextBillingAt,
-          },
+          data: updateSubData,
         },
       );
 
@@ -395,12 +411,45 @@ export class StripeWebhookService {
             lastPaymentId: publicPayment.id,
             status: TenantSubscriptionStatus.ACTIVE,
             nextBillingAt: publicSubUpdated.nextBillingAt,
+            firstPaidAt: publicSubUpdated.firstPaidAt ?? undefined,
           },
         });
       } catch (e: any) {
         if (e?.code !== 'P2025') {
           this.logger.error(
             'Errore aggiornamento Subscription (TENANT) da invoice.payment_succeeded',
+            e,
+          );
+        }
+      }
+
+      // Aggiorna stato CLIENT (PUBLIC + TENANT) in ACTIVE e attiva activatedAt (best effort)
+      if (publicSubUpdated.firstPaidAt) {
+        try {
+          await (this.prismaPublic as any).client.update({
+            where: { id: client.id },
+            data: {
+              status: PublicClientStatus.ACTIVE,
+              activatedAt: publicSubUpdated.firstPaidAt,
+            },
+          });
+        } catch (e: any) {
+          this.logger.error(
+            'Errore aggiornamento Client (PUBLIC) da invoice.payment_succeeded',
+            e,
+          );
+        }
+        try {
+          await (this.prismaTenant as any).client.update({
+            where: { id: client.id },
+            data: {
+              status: TenantClientStatus.ACTIVE,
+              activatedAt: publicSubUpdated.firstPaidAt,
+            },
+          });
+        } catch (e: any) {
+          this.logger.error(
+            'Errore aggiornamento Client (TENANT) da invoice.payment_succeeded',
             e,
           );
         }

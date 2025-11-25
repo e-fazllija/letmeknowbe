@@ -1,4 +1,3 @@
-// ---------- GENERATOR & DATASOURCE ----------
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/tenant"
@@ -9,9 +8,420 @@ datasource db {
   url      = env("TENANT_DATABASE_URL")
 }
 
-////////////////////////////////////////////////////
-// ENUM
-////////////////////////////////////////////////////
+model Department {
+  id         String     @id @default(cuid())
+  clientId   String?
+  name       String
+  active     Boolean    @default(true)
+  sortOrder  Int        @default(0)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  categories Category[]
+
+  @@unique([clientId, name])
+  @@index([clientId, active, sortOrder])
+}
+
+model Category {
+  id           String     @id @default(cuid())
+  clientId     String?
+  departmentId String
+  name         String
+  active       Boolean    @default(true)
+  sortOrder    Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  department   Department @relation(fields: [departmentId], references: [id])
+
+  @@unique([clientId, departmentId, name])
+  @@index([clientId, departmentId, active, sortOrder])
+}
+
+model Client {
+  id               String         @id @default(cuid())
+  companyName      String
+  contactEmail     String
+  employeeRange    EmployeeRange
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  status           ClientStatus   @default(ACTIVE)
+  activatedAt      DateTime?
+  stripeCustomerId String?        @unique
+  payments         Payment[]
+  subscriptions    Subscription[]
+
+  @@index([companyName])
+}
+
+model SubscriptionPlan {
+  id                   String         @id @default(cuid())
+  name                 String
+  description          String?
+  price                Decimal        @db.Decimal(10, 2)
+  currency             String         @default("EUR")
+  billingCycle         BillingCycle   @default(ANNUALE)
+  active               Boolean        @default(true)
+  stripeProductId      String?
+  stripePriceOneShotId String?
+  stripePriceSemiId    String?
+  stripePriceQuarterId String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  subscriptions        Subscription[]
+}
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  clientId             String
+  createdAt            DateTime           @default(now())
+  contractTerm         ContractTerm?
+  nextBillingAt        DateTime?
+  startsAt             DateTime           @default(now())
+  status               SubscriptionStatus @default(ACTIVE)
+  amount               Decimal            @db.Decimal(10, 2)
+  currency             String             @default("EUR")
+  endsAt               DateTime?
+  installmentPlan      InstallmentPlan    @default(ONE_SHOT)
+  lastPaymentId        String?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  subscriptionPlanId   String
+  updatedAt            DateTime           @updatedAt
+  firstPaidAt          DateTime?
+  payments             Payment[]
+  client               Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  lastPayment          Payment?           @relation("TenantSubscriptionLastPayment", fields: [lastPaymentId], references: [id])
+  plan                 SubscriptionPlan   @relation(fields: [subscriptionPlanId], references: [id])
+
+  @@index([clientId])
+}
+
+model Payment {
+  id                    String         @id @default(cuid())
+  clientId              String
+  subscriptionId        String?
+  amount                Decimal        @db.Decimal(10, 2)
+  currency              String         @default("EUR")
+  status                PaymentStatus  @default(PENDING)
+  method                PaymentMethod
+  dueDate               DateTime?
+  paymentDate           DateTime?
+  stripePaymentIntentId String?
+  stripeInvoiceId       String?
+  stripeChargeId        String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  client                Client         @relation(fields: [clientId], references: [id])
+  subscription          Subscription?  @relation(fields: [subscriptionId], references: [id])
+  lastPaymentOf         Subscription[] @relation("TenantSubscriptionLastPayment")
+
+  @@index([clientId])
+  @@index([subscriptionId])
+}
+
+model StripeWebhookEvent {
+  id          String    @id @default(cuid())
+  eventId     String    @unique
+  type        String
+  data        String?
+  receivedAt  DateTime  @default(now())
+  processed   Boolean   @default(false)
+  processedAt DateTime?
+  error       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([type, processed])
+}
+
+model InternalUser {
+  id              String                @id @default(cuid())
+  clientId        String
+  email           String
+  password        String
+  role            UserRole
+  status          UserStatus            @default(INVITED)
+  isOwner         Boolean               @default(false)
+  canViewAllCases Boolean               @default(false)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  mfaEnabled      Boolean               @default(false)
+  mfaSecret       String?
+  mfaVerifiedAt   DateTime?
+  RefreshSession  RefreshSession[]
+  auditReports    ReportAuditor[]
+  messages        ReportMessage[]       @relation("UserMessages")
+  personalNotes   ReportPersonalNote[]
+  statusLogs      ReportStatusHistory[] @relation("UserStatusLogs")
+  recoveryCodes   UserRecoveryCode[]
+  UserToken       UserToken[]
+  reports         WhistleReport[]       @relation("UserReports")
+
+  @@unique([clientId, email])
+  @@index([clientId])
+}
+
+model PublicUser {
+  id        String         @id @default(cuid())
+  clientId  String
+  token     String         @unique @db.VarChar(128)
+  reportId  String?
+  createdAt DateTime       @default(now())
+  report    WhistleReport? @relation(fields: [reportId], references: [id])
+
+  @@index([clientId])
+  @@index([token])
+}
+
+model WhistleReport {
+  id                   String                @id @default(cuid())
+  publicCode           String                @unique
+  secretHash           String                @db.VarChar(128)
+  status               ReportStatus          @default(OPEN)
+  title                String
+  summary              String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  deadline             DateTime?
+  acknowledgeAt        DateTime?
+  channel              ReportChannel         @default(WEB)
+  closedAt             DateTime?
+  consentGivenAt       DateTime?
+  consentVersion       String?
+  dueAt                DateTime?
+  locale               String?
+  clientId             String
+  finalClosedAt        DateTime?
+  inProgressAt         DateTime?
+  internalUserId       String?
+  openAt               DateTime?             @default(now())
+  eventDate            DateTime              @default(now())
+  privacy              ReporterPrivacy       @default(ANONIMO)
+  departmentId         String?
+  categoryId           String?
+  containsPIISuspected Boolean               @default(false)
+  ipHash               String?               @db.VarChar(128)
+  ua                   String?
+  retentionAt          DateTime?
+  assignedAt           DateTime?
+  reporterNameEnc      String?
+  publicUsers          PublicUser[]
+  accessLogs           ReportAccessLog[]
+  attachments          ReportAttachment[]
+  auditors             ReportAuditor[]
+  messages             ReportMessage[]
+  personalNotes        ReportPersonalNote[]
+  statusLogs           ReportStatusHistory[]
+  internalUser         InternalUser?         @relation("UserReports", fields: [internalUserId], references: [id])
+
+  @@index([clientId])
+  @@index([status])
+  @@index([clientId, publicCode])
+  @@index([internalUserId])
+}
+
+model ReportMessage {
+  id         String            @id @default(cuid())
+  reportId   String
+  author     String
+  body       String
+  createdAt  DateTime          @default(now())
+  authorId   String?
+  clientId   String
+  note       String?
+  visibility MessageVisibility @default(INTERNAL)
+  user       InternalUser?     @relation("UserMessages", fields: [authorId], references: [id])
+  report     WhistleReport     @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([clientId])
+  @@index([reportId, createdAt])
+  @@index([reportId, visibility])
+}
+
+model ReportStatusHistory {
+  id         String        @id @default(cuid())
+  reportId   String
+  note       String?
+  author     String?
+  agentId    String?
+  modifiedAt DateTime      @default(now())
+  status     ReportStatus
+  clientId   String
+  agent      InternalUser? @relation("UserStatusLogs", fields: [agentId], references: [id])
+  report     WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+  @@index([clientId])
+  @@index([status])
+}
+
+model ReportAttachment {
+  id         String           @id @default(cuid())
+  reportId   String
+  fileName   String
+  mimeType   String
+  sizeBytes  Int
+  storageKey String
+  createdAt  DateTime         @default(now())
+  status     AttachmentStatus @default(UPLOADED)
+  etag       String?
+  finalKey   String?
+  scannedAt  DateTime?
+  virusName  String?
+  report     WhistleReport    @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId])
+}
+
+model ReportPersonalNote {
+  id        String        @id @default(cuid())
+  clientId  String
+  reportId  String
+  userId    String
+  body      String
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  report    WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  user      InternalUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, userId])
+  @@index([clientId, reportId, userId])
+  @@index([reportId])
+}
+
+model ReportAuditor {
+  reportId   String
+  auditorId  String
+  assignedAt DateTime      @default(now())
+  auditor    InternalUser  @relation(fields: [auditorId], references: [id], onDelete: Cascade)
+  report     WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@id([reportId, auditorId])
+  @@index([auditorId, reportId])
+  @@index([reportId])
+}
+
+model UserToken {
+  id        String        @id @default(cuid())
+  userId    String
+  clientId  String
+  type      UserTokenType
+  selector  String        @unique
+  tokenHash String        @db.VarChar(128)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+  ip        String?
+  ua        String?
+  user      InternalUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, userId, type, expiresAt])
+}
+
+model RefreshSession {
+  id            String           @id @default(uuid())
+  userId        String
+  clientId      String
+  hash          String           @db.VarChar(128)
+  createdAt     DateTime         @default(now())
+  expiresAt     DateTime
+  lastUsedAt    DateTime?
+  revokedAt     DateTime?
+  rotatedFromId String?
+  ip            String?
+  ua            String?
+  rotatedFrom   RefreshSession?  @relation("RefreshRotation", fields: [rotatedFromId], references: [id])
+  rotatedTo     RefreshSession[] @relation("RefreshRotation")
+  user          InternalUser     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, clientId])
+  @@index([expiresAt])
+}
+
+model UserRecoveryCode {
+  id        String       @id @default(cuid())
+  userId    String
+  codeHash  String       @db.VarChar(128)
+  createdAt DateTime     @default(now())
+  usedAt    DateTime?
+  user      InternalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+}
+
+model ReportAccessLog {
+  id        String        @id @default(cuid())
+  reportId  String
+  userId    String
+  clientId  String
+  action    String
+  ip        String?
+  ua        String?
+  createdAt DateTime      @default(now())
+  report    WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, createdAt])
+  @@index([userId, createdAt])
+  @@index([clientId, createdAt])
+}
+
+model CasePolicy {
+  clientId                String           @id
+  restrictVisibility      Boolean          @default(false)
+  allowMentions           Boolean          @default(true)
+  redactPii               Boolean          @default(false)
+  allowAttachments        Boolean          @default(true)
+  updatedAt               DateTime         @updatedAt
+  publicLookupPreference  LookupPreference @default(PREFER_TENANT)
+  publicShowGlobalLookups Boolean          @default(true)
+  publicShowTenantLookups Boolean          @default(true)
+}
+
+model Template {
+  id        String             @id @default(cuid())
+  clientId  String
+  name      String
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  questions TemplateQuestion[]
+
+  @@unique([clientId, name])
+  @@index([clientId])
+}
+
+model TemplateQuestion {
+  id         String   @id @default(cuid())
+  templateId String
+  label      String
+  order      Int      @default(0)
+  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+}
+
+model BillingProfile {
+  clientId     String   @id
+  companyName  String
+  taxId        String
+  address      String
+  zip          String
+  city         String
+  province     String
+  country      String
+  billingEmail String
+  updatedAt    DateTime @updatedAt
+}
+
+model BillingPaymentMethod {
+  clientId  String   @id
+  type      String
+  masked    String
+  updatedAt DateTime @updatedAt
+}
+
+/// /////////////////////////////////////////////////
+/// /////////////////////////////////////////////////
 enum PaymentMethod {
   CARTA
   BONIFICO
@@ -30,8 +440,8 @@ enum ReportStatus {
   OPEN
   IN_PROGRESS
   SUSPENDED
-  NEED_INFO
   CLOSED
+  NEED_INFO
 }
 
 enum ReportChannel {
@@ -41,33 +451,30 @@ enum ReportChannel {
   OTHER
 }
 
-// Privacy del segnalante
 enum ReporterPrivacy {
   ANONIMO
   CONFIDENZIALE
 }
 
-// Stato cliente (coerente col public)
 enum ClientStatus {
+  PENDING_PAYMENT
   ACTIVE
   SUSPENDED
   ARCHIVED
 }
 
-// Ciclo fatturazione (coerente col public)
 enum BillingCycle {
   MENSILE
   ANNUALE
 }
 
-// Durata contrattuale (coerente col public)
 enum ContractTerm {
   ONE_YEAR
   THREE_YEARS
 }
 
-// Stato subscription (coerente col public)
 enum SubscriptionStatus {
+  PENDING_PAYMENT
   ACTIVE
   TRIALING
   PAST_DUE
@@ -75,14 +482,12 @@ enum SubscriptionStatus {
   EXPIRED
 }
 
-// 🔹 NUOVO: piano di rateizzazione (allineato a INTENT)
 enum InstallmentPlan {
-  ONE_SHOT     // pagamento annuale in un'unica soluzione
-  SEMESTRALE   // 2 rate (ogni 6 mesi)
-  TRIMESTRALE  // 4 rate (ogni 3 mesi)
+  ONE_SHOT
+  SEMESTRALE
+  TRIMESTRALE
 }
 
-// 🔹 NUOVO: stato del singolo pagamento (allineato a INTENT)
 enum PaymentStatus {
   PENDING
   COMPLETED
@@ -90,7 +495,6 @@ enum PaymentStatus {
   REFUNDED
 }
 
-// --- NEW: User/Invite/Session enums ---
 enum UserStatus {
   INVITED
   ACTIVE
@@ -109,14 +513,12 @@ enum UserTokenType {
   VERIFY
 }
 
-// Visibilità dei messaggi
 enum MessageVisibility {
   PUBLIC
   INTERNAL
   SYSTEM
 }
 
-// Stato allegati durante pipeline di scan/promozione
 enum AttachmentStatus {
   UPLOADED
   SCANNING
@@ -124,529 +526,8 @@ enum AttachmentStatus {
   INFECTED
 }
 
-// Preferenza deduplica lookups per il form pubblico
 enum LookupPreference {
   PREFER_TENANT
   PREFER_GLOBAL
   SHOW_ALL
-}
-
-////////////////////////////////////////////////////
-// MODELS
-////////////////////////////////////////////////////
-
-// Lookup per-tenant: Reparti
-model Department {
-  id        String   @id @default(cuid())
-  clientId  String?
-  name      String
-  active    Boolean  @default(true)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  categories Category[]
-
-  @@unique([clientId, name])
-  @@index([clientId, active, sortOrder])
-}
-
-// Lookup per-tenant: Categorie (per reparto)
-model Category {
-  id           String   @id @default(cuid())
-  clientId     String?
-  departmentId String
-  name         String
-  active       Boolean  @default(true)
-  sortOrder    Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  department Department @relation(fields: [departmentId], references: [id])
-
-  @@unique([clientId, departmentId, name])
-  @@index([clientId, departmentId, active, sortOrder])
-}
-
-// Azienda cliente (tenant)
-model Client {
-  id            String         @id @default(cuid())
-  companyName   String
-  contactEmail  String
-  status        ClientStatus   @default(ACTIVE)
-  employeeRange EmployeeRange
-
-  // 🔹 Stripe Customer id (allineato con INTENT)
-  stripeCustomerId String? @unique
-
-  // Relazioni billing
-  subscriptions Subscription[]
-  payments      Payment[]
-
-  // Relazioni applicative
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-
-  @@index([companyName])
-}
-
-// 🔹 NUOVO: Piano di abbonamento (shadow nel tenant, allineato con INTENT)
-model SubscriptionPlan {
-  id          String   @id @default(cuid())
-  name        String
-  description String?
-
-  // prezzo "annuale" del piano
-  price       Decimal  @db.Decimal(10, 2)
-  currency    String   @default("EUR")
-
-  // nel vostro caso l’uso è annuale
-  billingCycle BillingCycle @default(ANNUALE)
-
-  active      Boolean  @default(true)
-
-  // opzionale: info Stripe per mostrare in UI del tenant
-  stripeProductId      String?
-  stripePriceOneShotId String?
-  stripePriceSemiId    String?
-  stripePriceQuarterId String?
-
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  subscriptions Subscription[]
-}
-
-// 🔹 NUOVO: Abbonamenti (billing completo nel tenant, allineato a INTENT)
-model Subscription {
-  id        String   @id @default(cuid())
-
-  clientId  String
-  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  subscriptionPlanId String
-  plan               SubscriptionPlan @relation(fields: [subscriptionPlanId], references: [id])
-
-  status       SubscriptionStatus @default(ACTIVE)
-  contractTerm ContractTerm?      // ONE_YEAR / THREE_YEARS se serve
-
-  // Come paga il piano annuale
-  installmentPlan InstallmentPlan @default(ONE_SHOT)
-
-  // Periodo coperto da questo contratto
-  startsAt      DateTime @default(now())
-  endsAt        DateTime?
-  nextBillingAt DateTime?
-
-  // Importo totale del contratto (annuale) per questo cliente
-  amount   Decimal @db.Decimal(10, 2)
-  currency String  @default("EUR")
-
-  // Stripe (shadow, solo lettura dal punto di vista del tenant)
-  stripeSubscriptionId String?
-  stripeCustomerId     String?
-
-  // Ultimo pagamento riuscito (per lookup veloce)
-  lastPaymentId String?
-  lastPayment   Payment? @relation("TenantSubscriptionLastPayment", fields: [lastPaymentId], references: [id])
-
-  // Tutti i pagamenti associati
-  payments Payment[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([clientId])
-}
-
-// 🔹 NUOVO: Pagamenti (rate o pagamento unico) nel tenant
-model Payment {
-  id          String   @id @default(cuid())
-
-  clientId    String
-  client      Client   @relation(fields: [clientId], references: [id])
-
-  subscriptionId String?
-  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
-
-  amount      Decimal  @db.Decimal(10, 2)
-  currency    String   @default("EUR")
-
-  status      PaymentStatus @default(PENDING)
-  method      PaymentMethod // CARTA / BONIFICO
-
-  dueDate     DateTime?      // scadenza rata
-  paymentDate DateTime?      // data pagamento effettivo
-
-  // Stripe refs (shadow)
-  stripePaymentIntentId String?
-  stripeInvoiceId       String?
-  stripeChargeId        String?
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // back-relation per Subscription.lastPayment
-  lastPaymentOf Subscription[] @relation("TenantSubscriptionLastPayment")
-
-  @@index([clientId])
-  @@index([subscriptionId])
-}
-
-// 🔹 NUOVO: Log eventi Stripe (shadow nel tenant)
-model StripeWebhookEvent {
-  id          String   @id @default(cuid())
-  eventId     String   @unique        // ID evento Stripe: "evt_..."
-  type        String                 // es. "invoice.payment_succeeded"
-  data        String?                // payload JSON (se vuoi salvarlo)
-  receivedAt  DateTime @default(now())
-  processed   Boolean  @default(false)
-  processedAt DateTime?
-  error       String?
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([type, processed])
-}
-
-// Utenti interni (admin, agent)
-model InternalUser {
-  id              String     @id @default(cuid())
-  clientId        String
-  email           String
-  password        String
-  role            UserRole
-  status          UserStatus @default(INVITED)
-  isOwner         Boolean    @default(false)
-  canViewAllCases Boolean    @default(false)
-  mfaEnabled      Boolean    @default(false)
-  mfaSecret       String?
-  mfaVerifiedAt   DateTime?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-
-  reports        WhistleReport[]       @relation("UserReports")
-  messages       ReportMessage[]       @relation("UserMessages")
-  statusLogs     ReportStatusHistory[] @relation("UserStatusLogs")
-  UserToken      UserToken[]
-  RefreshSession RefreshSession[]
-  recoveryCodes  UserRecoveryCode[]
-
-  // Backrelation: note personali
-  personalNotes ReportPersonalNote[]
-  // Backrelation: report assegnati come AUDITOR
-  auditReports  ReportAuditor[]
-
-  @@unique([clientId, email])
-  @@index([clientId])
-}
-
-// Utenti pubblici (segnalatori esterni)
-model PublicUser {
-  id        String         @id @default(cuid())
-  clientId  String
-  token     String         @unique @db.VarChar(128) // sha256
-  reportId  String?
-  report    WhistleReport? @relation(fields: [reportId], references: [id])
-  createdAt DateTime       @default(now())
-
-  @@index([clientId])
-  @@index([token])
-}
-
-////////////////////////////////////////////////////
-// REPORTING
-////////////////////////////////////////////////////
-
-// Segnalazioni
-model WhistleReport {
-  id             String        @id @default(cuid())
-  clientId       String
-  publicCode     String        @unique
-  secretHash     String        @db.VarChar(128) // sha256
-  status         ReportStatus  @default(OPEN)
-  title          String
-  summary        String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  deadline       DateTime?
-  acknowledgeAt  DateTime?
-  channel        ReportChannel @default(WEB)
-  closedAt       DateTime?
-  consentGivenAt DateTime?
-  consentVersion String?
-  dueAt          DateTime?
-  locale         String?
-
-  // Timestamp transizioni di stato (per logica SLA)
-  openAt        DateTime? @default(now())
-  inProgressAt  DateTime?
-  finalClosedAt DateTime?
-
-  // Campi public form
-  eventDate            DateTime        @default(now())
-  privacy              ReporterPrivacy @default(ANONIMO)
-  departmentId         String?
-  categoryId           String?
-  containsPIISuspected Boolean         @default(false)
-  // Nominativo segnalante (cifrato AES-GCM, solo per privacy=CONFIDENZIALE)
-  reporterNameEnc      String?
-  ipHash               String?         @db.VarChar(128)
-  ua                   String?
-  retentionAt          DateTime?
-
-  internalUserId String?
-  internalUser   InternalUser? @relation("UserReports", fields: [internalUserId], references: [id])
-
-  // Assegnazione casi
-  assignedAt DateTime?
-
-  publicUsers   PublicUser[]
-  messages      ReportMessage[]
-  statusLogs    ReportStatusHistory[]
-  attachments   ReportAttachment[]
-  accessLogs    ReportAccessLog[]
-  // Backrelation: note personali
-  personalNotes ReportPersonalNote[]
-  // Backrelation: auditor assignments
-  auditors      ReportAuditor[]
-
-  @@index([clientId])
-  @@index([status])
-  @@index([clientId, publicCode])
-  @@index([internalUserId])
-}
-
-// Messaggi delle segnalazioni
-model ReportMessage {
-  id        String   @id @default(cuid())
-  clientId  String
-  reportId  String
-  author    String
-  body      String
-  createdAt DateTime @default(now())
-
-  // Nota interna (admin/agent)
-  note String?
-
-  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-
-  authorId String?
-  user     InternalUser? @relation("UserMessages", fields: [authorId], references: [id])
-
-  // Visibilità del messaggio
-  visibility MessageVisibility @default(INTERNAL)
-
-  @@index([reportId])
-  @@index([clientId])
-  @@index([reportId, createdAt])
-  @@index([reportId, visibility])
-}
-
-// Storico cambi di stato
-model ReportStatusHistory {
-  id         String       @id @default(cuid())
-  clientId   String
-  reportId   String
-  note       String?
-  author     String?
-  agentId    String?
-  modifiedAt DateTime     @default(now())
-  status     ReportStatus
-
-  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  agent  InternalUser? @relation("UserStatusLogs", fields: [agentId], references: [id])
-
-  @@index([reportId])
-  @@index([clientId])
-  @@index([status])
-}
-
-// Metadati allegati dei report (upload via presign)
-model ReportAttachment {
-  id         String   @id @default(cuid())
-  reportId   String
-  fileName   String
-  mimeType   String
-  sizeBytes  Int
-  storageKey String
-  createdAt  DateTime @default(now())
-
-  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-
-  // Stato pipeline allegati
-  status    AttachmentStatus @default(UPLOADED)
-  etag      String?
-  finalKey  String?
-  scannedAt DateTime?
-  virusName String?
-
-  @@index([reportId])
-}
-
-// Note personali per utente su report (private, non in timeline)
-model ReportPersonalNote {
-  id        String   @id @default(cuid())
-  clientId  String
-  reportId  String
-  userId    String
-  body      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  user   InternalUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([reportId, userId])
-  @@index([clientId, reportId, userId])
-  @@index([reportId])
-}
-
-// Relazione di assegnazione per AUDITOR (solo lettura)
-model ReportAuditor {
-  reportId   String
-  auditorId  String
-  assignedAt DateTime @default(now())
-
-  report  WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  auditor InternalUser  @relation(fields: [auditorId], references: [id], onDelete: Cascade)
-
-  @@id([reportId, auditorId])
-  @@index([auditorId, reportId])
-  @@index([reportId])
-}
-
-// --- NEW: Token di invito/reset split (selector + tokenHash) ---
-model UserToken {
-  id        String        @id @default(cuid())
-  userId    String
-  clientId  String
-  type      UserTokenType
-  selector  String        @unique
-  tokenHash String        @db.VarChar(128)
-  expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime      @default(now())
-  ip        String?
-  ua        String?
-
-  user InternalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([clientId, userId, type, expiresAt])
-}
-
-// --- NEW: Sessioni refresh con rotazione e revoke ---
-model RefreshSession {
-  id            String    @id @default(uuid()) // jti
-  userId        String
-  clientId      String
-  hash          String    @db.VarChar(128)
-  createdAt     DateTime  @default(now())
-  expiresAt     DateTime
-  lastUsedAt    DateTime?
-  revokedAt     DateTime?
-  rotatedFromId String?
-  ip            String?
-  ua            String?
-
-  user        InternalUser     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  rotatedFrom RefreshSession?  @relation("RefreshRotation", fields: [rotatedFromId], references: [id])
-  rotatedTo   RefreshSession[] @relation("RefreshRotation")
-
-  @@index([userId, clientId])
-  @@index([expiresAt])
-}
-
-// --- NEW: Codici di recupero MFA ---
-model UserRecoveryCode {
-  id        String    @id @default(cuid())
-  userId    String
-  codeHash  String    @db.VarChar(128)
-  createdAt DateTime  @default(now())
-  usedAt    DateTime?
-
-  user InternalUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, usedAt])
-}
-
-// --- NEW: Access log per audit (view/export)
-model ReportAccessLog {
-  id        String   @id @default(cuid())
-  reportId  String
-  userId    String
-  clientId  String
-  action    String // VIEW | EXPORT | LIST | OTHER
-  ip        String?
-  ua        String?
-  createdAt DateTime @default(now())
-
-  report WhistleReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
-
-  @@index([reportId, createdAt])
-  @@index([userId, createdAt])
-  @@index([clientId, createdAt])
-}
-
-// Case policy per-tenant (impostazioni)
-model CasePolicy {
-  clientId           String   @id
-  restrictVisibility Boolean  @default(false)
-  allowMentions      Boolean  @default(true)
-  redactPii          Boolean  @default(false)
-  allowAttachments   Boolean  @default(true)
-  updatedAt          DateTime @updatedAt
-
-  // Visibilità lookups sul form pubblico
-  publicShowGlobalLookups  Boolean           @default(true)
-  publicShowTenantLookups  Boolean           @default(true)
-  publicLookupPreference   LookupPreference  @default(PREFER_TENANT)
-}
-
-// Templates per questionari interni
-model Template {
-  id        String   @id @default(cuid())
-  clientId  String
-  name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  questions TemplateQuestion[]
-
-  @@unique([clientId, name])
-  @@index([clientId])
-}
-
-model TemplateQuestion {
-  id         String @id @default(cuid())
-  templateId String
-  label      String
-  order      Int    @default(0)
-
-  template Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
-
-  @@index([templateId])
-}
-
-// Billing profilo minimo in tenant (opzionale)
-model BillingProfile {
-  clientId     String   @id
-  companyName  String
-  taxId        String
-  address      String
-  zip          String
-  city         String
-  province     String
-  country      String
-  billingEmail String
-  updatedAt    DateTime @updatedAt
-}
-
-// Payment method minimo in tenant (mascherato)
-model BillingPaymentMethod {
-  clientId  String   @id
-  type      String
-  masked    String
-  updatedAt DateTime @updatedAt
 }

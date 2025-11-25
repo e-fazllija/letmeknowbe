@@ -1,6 +1,3 @@
-// This is your Prisma schema file for the PUBLIC / INTENT database.
-// Contiene la "fonte di verità" per billing e integrazione con Stripe.
-
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/public"
@@ -8,12 +5,117 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("PUBLIC_DATABASE_URL") // es: postgresql://postgres:password@localhost:5432/whistledb_INTENT
+  url      = env("PUBLIC_DATABASE_URL")
 }
 
-////////////////////////////////////////////////////
-// ENUM
-////////////////////////////////////////////////////
+model Client {
+  id                  String         @id @default(cuid())
+  companyName         String
+  contactEmail        String
+  employeeRange       EmployeeRange
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  billingAddressLine1 String
+  billingCity         String
+  billingCountry      String
+  billingEmail        String
+  billingPec          String?
+  billingProvince     String
+  billingSdiCode      String?
+  billingTaxId        String         @unique
+  billingZip          String
+  status              ClientStatus   @default(ACTIVE)
+  stripeCustomerId    String?        @unique
+  activatedAt         DateTime?
+  payments            Payment[]
+  subscriptions       Subscription[]
+
+  @@index([companyName])
+}
+
+model SubscriptionPlan {
+  id                   String         @id @default(cuid())
+  name                 String
+  description          String?
+  price                Decimal        @db.Decimal(10, 2)
+  currency             String         @default("EUR")
+  billingCycle         BillingCycle   @default(ANNUALE)
+  active               Boolean        @default(true)
+  stripeProductId      String?
+  stripePriceOneShotId String?
+  stripePriceSemiId    String?
+  stripePriceQuarterId String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  subscriptions        Subscription[]
+}
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  clientId             String
+  amount               Decimal            @db.Decimal(10, 2)
+  currency             String             @default("EUR")
+  createdAt            DateTime           @default(now())
+  contractTerm         ContractTerm?
+  nextBillingAt        DateTime?
+  startsAt             DateTime           @default(now())
+  status               SubscriptionStatus @default(ACTIVE)
+  endsAt               DateTime?
+  installmentPlan      InstallmentPlan    @default(ONE_SHOT)
+  lastPaymentId        String?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?            @unique
+  subscriptionPlanId   String
+  updatedAt            DateTime           @updatedAt
+  firstPaidAt          DateTime?
+  payments             Payment[]
+  client               Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  lastPayment          Payment?           @relation("SubscriptionLastPayment", fields: [lastPaymentId], references: [id])
+  plan                 SubscriptionPlan   @relation(fields: [subscriptionPlanId], references: [id])
+
+  @@index([clientId])
+}
+
+model Payment {
+  id                    String         @id @default(cuid())
+  clientId              String
+  subscriptionId        String?
+  amount                Decimal        @db.Decimal(10, 2)
+  currency              String         @default("EUR")
+  status                PaymentStatus  @default(PENDING)
+  method                PaymentMethod
+  dueDate               DateTime?
+  paymentDate           DateTime?
+  transactionId         String?
+  notes                 String?
+  stripePaymentIntentId String?
+  stripeInvoiceId       String?
+  stripeChargeId        String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  client                Client         @relation(fields: [clientId], references: [id])
+  subscription          Subscription?  @relation(fields: [subscriptionId], references: [id])
+  lastPaymentOf         Subscription[] @relation("SubscriptionLastPayment")
+
+  @@index([clientId])
+  @@index([subscriptionId])
+  @@index([stripePaymentIntentId])
+}
+
+model StripeWebhookEvent {
+  id          String    @id @default(cuid())
+  eventId     String    @unique
+  type        String
+  data        String?
+  receivedAt  DateTime  @default(now())
+  processed   Boolean   @default(false)
+  processedAt DateTime?
+  error       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([type, processed])
+}
 
 enum PaymentMethod {
   CARTA
@@ -29,205 +131,41 @@ enum EmployeeRange {
   OLTRE_250
 }
 
-// Stato cliente
 enum ClientStatus {
   ACTIVE
   SUSPENDED
   ARCHIVED
+  PENDING_PAYMENT
 }
 
-// Ciclo di fatturazione (del piano)
 enum BillingCycle {
   MENSILE
   ANNUALE
 }
 
-// Durata contrattuale
 enum ContractTerm {
   ONE_YEAR
   THREE_YEARS
 }
 
-// Stato abbonamento
 enum SubscriptionStatus {
   ACTIVE
   TRIALING
   PAST_DUE
   CANCELED
   EXPIRED
+  PENDING_PAYMENT
 }
 
-// Piano di rateizzazione per il vostro annuale
 enum InstallmentPlan {
-  ONE_SHOT     // pagamento annuale in un'unica soluzione
-  SEMESTRALE   // 2 rate (ogni 6 mesi)
-  TRIMESTRALE  // 4 rate (ogni 3 mesi)
+  ONE_SHOT
+  SEMESTRALE
+  TRIMESTRALE
 }
 
-// Stato del singolo pagamento
 enum PaymentStatus {
   PENDING
   COMPLETED
   FAILED
   REFUNDED
-}
-
-////////////////////////////////////////////////////
-// MODELS
-////////////////////////////////////////////////////
-
-// CLIENT (azienda)
-model Client {
-  id            String         @id @default(cuid())
-  companyName   String
-  contactEmail  String
-  status        ClientStatus   @default(ACTIVE)
-  employeeRange EmployeeRange
-
-  // Billing fields (fonte di verità in PUBLIC)
-  billingTaxId        String  @unique
-  billingEmail        String
-  billingPec          String?
-  billingSdiCode      String?
-  billingAddressLine1 String
-  billingZip          String
-  billingCity         String
-  billingProvince     String
-  billingCountry      String
-
-  // Stripe Customer collegato a questa azienda
-  stripeCustomerId String? @unique
-
-  // Relazioni billing
-  subscriptions Subscription[]
-  payments      Payment[]
-
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  @@index([companyName])
-}
-
-// PIANO DI ABBONAMENTO (nel vostro caso ne avrete 1 solo, annuale)
-model SubscriptionPlan {
-  id          String   @id @default(cuid())
-  name        String              // es. "Whistleblowing Annual Plan"
-  description String?
-
-  // Prezzo "teorico" del piano (annuale)
-  price       Decimal  @db.Decimal(10, 2)
-  currency    String   @default("EUR")
-
-  // Ciclo di fatturazione del piano (nel vostro caso: ANNUALE)
-  billingCycle BillingCycle @default(ANNUALE)
-
-  active      Boolean  @default(true)
-
-  // Stripe: 1 Product + fino a 3 Price (unica soluzione / 6 mesi / 3 mesi)
-  stripeProductId      String? // "prod_..."
-  stripePriceOneShotId String? // price annuale in unica soluzione
-  stripePriceSemiId    String? // price rata semestrale
-  stripePriceQuarterId String? // price rata trimestrale
-
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  subscriptions Subscription[]
-}
-
-// ABBONAMENTO DEL CLIENT AD UN PIANO
-model Subscription {
-  id        String   @id @default(cuid())
-
-  clientId  String
-  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-
-  subscriptionPlanId String
-  plan               SubscriptionPlan @relation(fields: [subscriptionPlanId], references: [id])
-
-  status       SubscriptionStatus @default(ACTIVE)
-  contractTerm ContractTerm?      // ONE_YEAR / THREE_YEARS se vi serve
-
-  // Come paga il piano annuale
-  installmentPlan InstallmentPlan @default(ONE_SHOT)
-
-  // Periodo coperto da questo contratto
-  startsAt      DateTime @default(now())
-  endsAt        DateTime?
-  nextBillingAt DateTime?
-
-  // Importo totale del contratto (annuale) per questo cliente
-  amount   Decimal @db.Decimal(10, 2)
-  currency String  @default("EUR")
-
-  // Stripe Subscription collegata
-  stripeSubscriptionId String? @unique
-  stripeCustomerId     String?
-
-  // Ultimo pagamento riuscito (per lookup veloce)
-  lastPaymentId String?
-  lastPayment   Payment? @relation("SubscriptionLastPayment", fields: [lastPaymentId], references: [id])
-
-  // Tutti i pagamenti associati (rate)
-  payments Payment[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([clientId])
-}
-
-// PAGAMENTI (rate o pagamento unico)
-model Payment {
-  id          String   @id @default(cuid())
-
-  clientId    String
-  client      Client   @relation(fields: [clientId], references: [id])
-
-  subscriptionId String?
-  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
-
-  amount      Decimal  @db.Decimal(10, 2)
-  currency    String   @default("EUR")
-
-  status      PaymentStatus @default(PENDING)
-  method      PaymentMethod // CARTA / BONIFICO
-
-  dueDate     DateTime?      // scadenza rata
-  paymentDate DateTime?      // data pagamento effettivo
-
-  transactionId String?      // opzionale (es. id bonifico interno)
-  notes         String?
-
-  // Stripe references
-  stripePaymentIntentId String? // "pi_..."
-  stripeInvoiceId       String? // "in_..."
-  stripeChargeId        String? // "ch_..."
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  // back-relation da Subscription.lastPayment
-  lastPaymentOf Subscription[] @relation("SubscriptionLastPayment")
-
-  @@index([clientId])
-  @@index([subscriptionId])
-  @@index([stripePaymentIntentId])
-}
-
-// LOG WEBHOOK STRIPE (solo INTENT, ma puoi replicarlo anche in TENANT se vuoi)
-model StripeWebhookEvent {
-  id          String   @id @default(cuid())
-  eventId     String   @unique        // ID evento Stripe: "evt_..."
-  type        String                 // es. "invoice.payment_succeeded"
-  data        String?                // payload JSON (puoi troncarlo lato app)
-  receivedAt  DateTime @default(now())
-  processed   Boolean  @default(false)
-  processedAt DateTime?
-  error       String?
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([type, processed])
 }
