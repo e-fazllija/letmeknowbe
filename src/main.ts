@@ -10,7 +10,8 @@ import { sanitizeUrl } from './common/logging/sanitize-url';
 import { csrfMiddleware } from './common/middleware/csrf.middleware';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // Disabilitiamo il bodyParser di Nest per gestire manualmente il raw body di Stripe
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
 
   // Correlation ID / Request logging (lightweight)
   app.use((req: any, res: any, next: any) => {
@@ -34,12 +35,19 @@ async function bootstrap() {
   app.use(helmet());
   app.use(cookieParser());
 
-  // Raw body for Stripe webhook signature verification
-  app.use('/v1/public/stripe/webhook', raw({ type: 'application/json' }));
-
-  // Body size limits (allegati via presign, non via body)
-  app.use(json({ limit: '1mb' }));
-  app.use(urlencoded({ extended: true, limit: '1mb' }));
+  // Raw body for Stripe webhook signature verification (salta il JSON parser)
+  const stripeWebhookPath = '/v1/public/stripe/webhook';
+  const jsonParser = json({ limit: '1mb' });
+  const urlencodedParser = urlencoded({ extended: true, limit: '1mb' });
+  app.use(stripeWebhookPath, raw({ type: 'application/json' }));
+  app.use((req: any, res: any, next: any) => {
+    if (req.originalUrl?.startsWith(stripeWebhookPath)) return next();
+    return jsonParser(req, res, next);
+  });
+  app.use((req: any, res: any, next: any) => {
+    if (req.originalUrl?.startsWith(stripeWebhookPath)) return next();
+    return urlencodedParser(req, res, next);
+  });
 
   // Abilita CORS (credentials:true) – evita '*'
   const isProd = (process.env.NODE_ENV || '').toLowerCase() === 'production';
