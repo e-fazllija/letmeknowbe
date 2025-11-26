@@ -28,14 +28,14 @@ export class UserService {
     if (!clientId) throw new BadRequestException('Tenant non valido');
     return this.prisma.internalUser.findMany({
       where: { clientId },
-      select: { id: true, email: true, role: true, createdAt: true },
+      select: { id: true, email: true, role: true, createdAt: true, isOwner: true },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async findOneByClient(clientId: string, id: string) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
-    const user = await this.prisma.internalUser.findFirst({ where: { id, clientId }, select: { id: true, email: true, role: true, createdAt: true } });
+    const user = await this.prisma.internalUser.findFirst({ where: { id, clientId }, select: { id: true, email: true, role: true, createdAt: true, isOwner: true } });
     if (!user) throw new NotFoundException('Utente non trovato');
     return user;
   }
