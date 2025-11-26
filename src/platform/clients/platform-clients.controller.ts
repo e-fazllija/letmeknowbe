@@ -16,6 +16,12 @@ export class PlatformClientsController {
     return this.service.findAll();
   }
 
+  @Get(':id/invoices')
+  @ApiOperation({ summary: 'Fatture e ricevute Stripe per client' })
+  findInvoices(@Param('id') id: string) {
+    return this.service.findInvoices(id);
+  }
+
   @Get(':id')
   @ApiOperation({ summary: 'Dettaglio Client (PUBLIC) con subscriptions' })
   findOne(@Param('id') id: string) {
