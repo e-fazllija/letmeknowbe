@@ -119,6 +119,15 @@ export class ClientService {
           contactEmail: clientData.contactEmail,
           employeeRange: clientData.employeeRange,
           status: clientData.status as any, // tipi allineati (enum identico nel tenant)
+          billingTaxId: dto.client.billing.billingTaxId,
+          billingEmail: dto.client.billing.billingEmail,
+          billingPec: dto.client.billing.billingPec ?? undefined,
+          billingSdiCode: dto.client.billing.billingSdiCode ?? undefined,
+          billingAddressLine1: dto.client.billing.billingAddressLine1,
+          billingZip: dto.client.billing.billingZip,
+          billingCity: dto.client.billing.billingCity,
+          billingProvince: dto.client.billing.billingProvince,
+          billingCountry: dto.client.billing.billingCountry,
         },
         create: {
           id: createdClient.id,
@@ -126,23 +135,15 @@ export class ClientService {
           contactEmail: clientData.contactEmail,
           employeeRange: clientData.employeeRange,
           status: clientData.status as any,
-        },
-      });
-
-      // 4b) Inizializza BillingProfile nel TENANT usando i dati PUBLIC
-      await (this.tenantPrisma as any).billingProfile.upsert({
-        where: { clientId: createdClient.id },
-        update: {},
-        create: {
-          clientId: createdClient.id,
-          companyName: clientData.companyName,
-          taxId: dto.client.billing.billingTaxId,
-          address: dto.client.billing.billingAddressLine1,
-          zip: dto.client.billing.billingZip,
-          city: dto.client.billing.billingCity,
-          province: dto.client.billing.billingProvince,
-          country: dto.client.billing.billingCountry,
+          billingTaxId: dto.client.billing.billingTaxId,
           billingEmail: dto.client.billing.billingEmail,
+          billingPec: dto.client.billing.billingPec ?? undefined,
+          billingSdiCode: dto.client.billing.billingSdiCode ?? undefined,
+          billingAddressLine1: dto.client.billing.billingAddressLine1,
+          billingZip: dto.client.billing.billingZip,
+          billingCity: dto.client.billing.billingCity,
+          billingProvince: dto.client.billing.billingProvince,
+          billingCountry: dto.client.billing.billingCountry,
         },
       });
 
@@ -301,6 +302,15 @@ export class ClientService {
           contactEmail: client.contactEmail,
           employeeRange: client.employeeRange,
           status: client.status as any,
+          billingTaxId: (dto as any).billingTaxId,
+          billingEmail: (dto as any).billingEmail,
+          billingPec: (dto as any).billingPec ?? undefined,
+          billingSdiCode: (dto as any).billingSdiCode ?? undefined,
+          billingAddressLine1: (dto as any).billingAddressLine1,
+          billingZip: (dto as any).billingZip,
+          billingCity: (dto as any).billingCity,
+          billingProvince: (dto as any).billingProvince,
+          billingCountry: (dto as any).billingCountry,
         },
       });
 
@@ -381,6 +391,15 @@ export class ClientService {
           contactEmail: dto.contactEmail ?? undefined,
           employeeRange: dto.employeeRange ?? undefined,
           status: (dto.status as any) ?? undefined,
+          billingTaxId: (dto as any).billingTaxId ?? undefined,
+          billingEmail: (dto as any).billingEmail ?? undefined,
+          billingPec: (dto as any).billingPec ?? undefined,
+          billingSdiCode: (dto as any).billingSdiCode ?? undefined,
+          billingAddressLine1: (dto as any).billingAddressLine1 ?? undefined,
+          billingZip: (dto as any).billingZip ?? undefined,
+          billingCity: (dto as any).billingCity ?? undefined,
+          billingProvince: (dto as any).billingProvince ?? undefined,
+          billingCountry: (dto as any).billingCountry ?? undefined,
         },
       });
 

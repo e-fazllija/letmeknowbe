@@ -18,7 +18,6 @@ import { DepartmentModule } from './tenant/department/department.module';
 import { CategoryModule } from './tenant/category/category.module';
 import { StatsModule } from './tenant/stats/stats.module';
 import { CasePolicyModule } from './tenant/case-policy/case-policy.module';
-import { TemplatesModule } from './tenant/templates/templates.module';
 import { BillingModule } from './tenant/billing/billing.module';
 import { RateLimitFilter } from './common/filters/rate-limit.filter';
 import { SubscriptionGuard } from './common/guards/subscription.guard';
@@ -65,7 +64,6 @@ const envFilePath = (
     CategoryModule,
     StatsModule,
     CasePolicyModule,
-    TemplatesModule,
     BillingModule,
   ],
   providers: [

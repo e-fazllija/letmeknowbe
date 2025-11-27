@@ -330,6 +330,19 @@ export class StripeWebhookService {
       invoice.status_transitions?.paid_at || invoice.created || undefined;
     const paymentDate = paidAtSec ? new Date(paidAtSec * 1000) : undefined;
 
+    // Periodo dell'invoice: usato per aggiornare startsAt/endsAt al periodo coperto dall'ultimo pagamento
+    const linePeriod = (invoice.lines?.data?.[0]?.period as any) || {};
+    const periodStartSec =
+      (invoice.period_start as number | null | undefined) ??
+      (linePeriod.start as number | null | undefined) ??
+      undefined;
+    const periodEndSec =
+      (invoice.period_end as number | null | undefined) ??
+      (linePeriod.end as number | null | undefined) ??
+      undefined;
+    const periodStart = periodStartSec ? new Date(periodStartSec * 1000) : undefined;
+    const periodEnd = periodEndSec ? new Date(periodEndSec * 1000) : undefined;
+
     const stripeInvoiceId = invoice.id;
     const stripePaymentIntentId =
       (invoice.payment_intent as string | null | undefined) || undefined;
@@ -391,6 +404,14 @@ export class StripeWebhookService {
         nextBillingAt,
       };
 
+      // Aggiorna il periodo corrente pagato se presente sull'invoice
+      if (periodStart) {
+        updateSubData.startsAt = periodStart;
+      }
+      if (periodEnd) {
+        updateSubData.endsAt = periodEnd;
+      }
+
       // Prima attivazione: valorizza firstPaidAt una sola volta
       if (wasPending && !subscription.firstPaidAt) {
         updateSubData.firstPaidAt = paymentDate ?? new Date();
@@ -412,6 +433,8 @@ export class StripeWebhookService {
             status: TenantSubscriptionStatus.ACTIVE,
             nextBillingAt: publicSubUpdated.nextBillingAt,
             firstPaidAt: publicSubUpdated.firstPaidAt ?? undefined,
+            startsAt: publicSubUpdated.startsAt ?? undefined,
+            endsAt: publicSubUpdated.endsAt ?? undefined,
           },
         });
       } catch (e: any) {

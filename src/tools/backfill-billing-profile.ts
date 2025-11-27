@@ -12,9 +12,6 @@ async function run() {
     });
 
     for (const t of tenants) {
-      const existing = await (tenant as any).billingProfile.findUnique({ where: { clientId: t.id } });
-      if (existing) continue;
-
       const pc = await (pub as any).client.findUnique({ where: { id: t.id } });
       if (!pc) continue;
 
@@ -25,17 +22,19 @@ async function run() {
         continue;
       }
 
-      await (tenant as any).billingProfile.create({
+      await (tenant as any).client.update({
+        where: { id: t.id },
         data: {
-          clientId: t.id,
           companyName: pc.companyName,
-          taxId: pc.billingTaxId,
-          address: pc.billingAddressLine1,
-          zip: pc.billingZip,
-          city: pc.billingCity,
-          province: pc.billingProvince,
-          country: pc.billingCountry,
+          billingTaxId: pc.billingTaxId,
+          billingAddressLine1: pc.billingAddressLine1,
+          billingZip: pc.billingZip,
+          billingCity: pc.billingCity,
+          billingProvince: pc.billingProvince,
+          billingCountry: pc.billingCountry,
           billingEmail: pc.billingEmail,
+          billingPec: pc.billingPec ?? undefined,
+          billingSdiCode: pc.billingSdiCode ?? undefined,
         },
       });
 
@@ -53,4 +52,3 @@ run().catch((e) => {
   console.error(e);
   process.exitCode = 1;
 });
-
