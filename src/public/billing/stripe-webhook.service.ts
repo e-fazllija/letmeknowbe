@@ -8,6 +8,7 @@ import {
   PaymentStatus as PublicPaymentStatus,
   SubscriptionStatus as PublicSubscriptionStatus,
   ClientStatus as PublicClientStatus,
+  BillingCycle,
 } from '../../generated/public';
 import {
   SubscriptionStatus as TenantSubscriptionStatus,
@@ -315,6 +316,19 @@ export class StripeWebhookService {
       });
     }
 
+    // Recupera info piano per calcolare fallback periodo (mensile/annuale) in caso Stripe non fornisca period_end sensato
+    let plan: { billingCycle: BillingCycle | string } | null = null;
+    if (subscription?.subscriptionPlanId) {
+      try {
+        plan = await (this.prismaPublic as any).subscriptionPlan.findUnique({
+          where: { id: subscription.subscriptionPlanId },
+          select: { billingCycle: true },
+        });
+      } catch {
+        plan = null;
+      }
+    }
+
     const amountCents = invoice.amount_paid ?? invoice.total;
     if (!amountCents) {
       this.logger.warn(
@@ -332,16 +346,16 @@ export class StripeWebhookService {
 
     // Periodo dell'invoice: usato per aggiornare startsAt/endsAt al periodo coperto dall'ultimo pagamento
     const linePeriod = (invoice.lines?.data?.[0]?.period as any) || {};
-    const periodStartSec =
+    let periodStartSec =
       (invoice.period_start as number | null | undefined) ??
       (linePeriod.start as number | null | undefined) ??
       undefined;
-    const periodEndSec =
+    let periodEndSec =
       (invoice.period_end as number | null | undefined) ??
       (linePeriod.end as number | null | undefined) ??
       undefined;
-    const periodStart = periodStartSec ? new Date(periodStartSec * 1000) : undefined;
-    const periodEnd = periodEndSec ? new Date(periodEndSec * 1000) : undefined;
+    let periodStart = periodStartSec ? new Date(periodStartSec * 1000) : undefined;
+    let periodEnd = periodEndSec ? new Date(periodEndSec * 1000) : undefined;
 
     const stripeInvoiceId = invoice.id;
     const stripePaymentIntentId =
@@ -398,10 +412,70 @@ export class StripeWebhookService {
         (typeof subscription.status === 'string' &&
           subscription.status.toUpperCase() === 'PENDING_PAYMENT');
 
+      // Integra/valida il periodo usando la subscription Stripe (best effort)
+      if (stripeSubscriptionId) {
+        try {
+          const stripeSub = await this.stripe.sdk.subscriptions.retrieve(
+            stripeSubscriptionId as any,
+          );
+          const cpStart =
+            (stripeSub.current_period_start as number | null | undefined) ??
+            undefined;
+          const cpEnd =
+            (stripeSub.current_period_end as number | null | undefined) ??
+            undefined;
+          if (!periodStart && cpStart) {
+            periodStart = new Date(cpStart * 1000);
+          }
+          if (!periodEnd && cpEnd) {
+            periodEnd = new Date(cpEnd * 1000);
+          }
+          // Se la subscription Stripe ha un periodo più ampio, prendi quello
+          if (cpEnd && (!periodEnd || cpEnd * 1000 > periodEnd.getTime())) {
+            periodEnd = new Date(cpEnd * 1000);
+          }
+          if (cpStart && (!periodStart || cpStart * 1000 < periodStart.getTime())) {
+            periodStart = new Date(cpStart * 1000);
+          }
+          // Correggi eventuale incoerenza end <= start usando i dati Stripe se disponibili
+          if (
+            periodStart &&
+            periodEnd &&
+            periodEnd <= periodStart &&
+            cpStart &&
+            cpEnd &&
+            cpEnd > cpStart
+          ) {
+            periodStart = new Date(cpStart * 1000);
+            periodEnd = new Date(cpEnd * 1000);
+          }
+        } catch {
+          // best effort
+        }
+      }
+
+      // Se manca periodEnd o è uguale/inferiore a periodStart, calcola un fallback sul ciclo (mensile/annuale)
+      const cycleMonths =
+        (plan?.billingCycle as string | undefined) === 'MENSILE' ? 1 : 12;
+      if (!periodStart) {
+        periodStart = paymentDate ?? subscription.startsAt ?? new Date();
+      }
+      if (
+        periodStart &&
+        (!periodEnd || periodEnd <= periodStart)
+      ) {
+        const tmp = new Date(periodStart);
+        tmp.setMonth(tmp.getMonth() + cycleMonths);
+        periodEnd = tmp;
+      }
+
+      // Se non arriva nextBillingAt e abbiamo un periodEnd di fallback, usa quello
+      const effectiveNextBillingAt = nextBillingAt ?? periodEnd ?? null;
+
       const updateSubData: any = {
         lastPaymentId: publicPayment.id,
         status: PublicSubscriptionStatus.ACTIVE,
-        nextBillingAt,
+        nextBillingAt: effectiveNextBillingAt ?? undefined,
       };
 
       // Aggiorna il periodo corrente pagato se presente sull'invoice
