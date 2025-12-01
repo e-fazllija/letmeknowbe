@@ -2,7 +2,10 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaPublicService } from '../prisma-public.service';
 import { PrismaTenantService } from '../../tenant/prisma-tenant.service';
 import { StripeService } from '../../common/stripe/stripe.service';
-import { InstallmentPlan } from '../../generated/public';
+import {
+  InstallmentPlan,
+  SubscriptionStatus as PublicSubscriptionStatus,
+} from '../../generated/public';
 import Stripe from 'stripe';
 
 @Injectable()
@@ -164,6 +167,19 @@ export class PublicBillingService {
     if (!subscription || !subscription.plan) {
       throw new BadRequestException(
         'Nessuna subscription configurata per questo tenant',
+      );
+    }
+
+    // Impedisci nuove Checkout Session se l'abbonamento è già attivo / trial / in tolleranza
+    const blockedStatuses: PublicSubscriptionStatus[] = [
+      PublicSubscriptionStatus.ACTIVE,
+      PublicSubscriptionStatus.TRIALING,
+      PublicSubscriptionStatus.PAST_DUE,
+    ];
+
+    if (blockedStatuses.includes(subscription.status as PublicSubscriptionStatus)) {
+      throw new BadRequestException(
+        'Hai già un abbonamento attivo o in rinnovo: gestisci pagamenti e fatture dal Customer Portal.',
       );
     }
 
