@@ -22,6 +22,17 @@ export class PublicBillingController {
     return this.service.createCheckoutSession(clientId);
   }
 
+  @Post('payment-intent')
+  @ApiOperation({
+    summary: 'Prepara un PaymentIntent per il pagamento inline',
+    description:
+      'Richiede un access token tenant. Restituisce il client secret da usare con Stripe Payment Element senza aprire nuove finestre.',
+  })
+  createPaymentIntent(@Req() req: Request) {
+    const clientId = (req as any)?.user?.clientId as string;
+    return this.service.createInlinePaymentIntent(clientId);
+  }
+
   @Post('portal-session')
   @ApiOperation({
     summary: 'Crea una Stripe Customer Portal Session',

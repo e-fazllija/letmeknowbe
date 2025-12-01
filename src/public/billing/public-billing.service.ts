@@ -3,6 +3,7 @@ import { PrismaPublicService } from '../prisma-public.service';
 import { PrismaTenantService } from '../../tenant/prisma-tenant.service';
 import { StripeService } from '../../common/stripe/stripe.service';
 import { InstallmentPlan } from '../../generated/public';
+import Stripe from 'stripe';
 
 @Injectable()
 export class PublicBillingService {
@@ -39,7 +40,7 @@ export class PublicBillingService {
 
     const stripeCustomerId = customer.id;
 
-    // Aggiorna PUBLIC (fonte di verità)
+    // Aggiorna PUBLIC (fonte di verita)
     await this.prismaPublic.client.update({
       where: { id: client.id },
       data: { stripeCustomerId },
@@ -58,6 +59,91 @@ export class PublicBillingService {
     }
 
     return stripeCustomerId;
+  }
+
+  private async createOrReuseInlinePaymentIntent({
+    subscription,
+    priceId,
+    clientId,
+    stripeCustomerId,
+  }: {
+    subscription: { id: string; stripeSubscriptionId?: string | null };
+    priceId: string;
+    clientId: string;
+    stripeCustomerId: string;
+  }): Promise<{
+    paymentIntent: Stripe.PaymentIntent;
+    stripeSubscriptionId: string;
+    reused: boolean;
+  }> {
+    // Se esiste gia una subscription Stripe, prova a riutilizzare il PaymentIntent incompleto
+    if (subscription.stripeSubscriptionId) {
+      try {
+        const existingSub = await this.stripe.sdk.subscriptions.retrieve(
+          subscription.stripeSubscriptionId,
+          { expand: ['latest_invoice.payment_intent'] } as any,
+        );
+        const invoice = existingSub.latest_invoice as
+          | Stripe.Invoice
+          | null
+          | undefined;
+        const paymentIntent = invoice?.payment_intent as
+          | Stripe.PaymentIntent
+          | null
+          | undefined;
+
+        if (paymentIntent?.status === 'succeeded') {
+          throw new BadRequestException(
+            'Il pagamento risulta gia completato per questo abbonamento',
+          );
+        }
+
+        if (paymentIntent && paymentIntent.status !== 'canceled') {
+          return {
+            paymentIntent,
+            stripeSubscriptionId: existingSub.id,
+            reused: true,
+          };
+        }
+      } catch (err: any) {
+        // 404: subscription non trovata su Stripe, creane una nuova
+        if (err?.statusCode !== 404) {
+          throw err;
+        }
+      }
+    }
+
+    const stripeSub = await this.stripe.sdk.subscriptions.create({
+      customer: stripeCustomerId,
+      items: [{ price: priceId }],
+      payment_behavior: 'default_incomplete',
+      payment_settings: {
+        save_default_payment_method: 'on_subscription',
+      },
+      expand: ['latest_invoice.payment_intent'],
+      metadata: {
+        clientId,
+        subscriptionId: subscription.id,
+      },
+    });
+
+    const invoice = stripeSub.latest_invoice as Stripe.Invoice | null | undefined;
+    const paymentIntent = invoice?.payment_intent as
+      | Stripe.PaymentIntent
+      | null
+      | undefined;
+
+    if (!paymentIntent?.client_secret) {
+      throw new BadRequestException(
+        'Impossibile creare un Payment Intent per il piano selezionato',
+      );
+    }
+
+    return {
+      paymentIntent,
+      stripeSubscriptionId: stripeSub.id,
+      reused: false,
+    };
   }
 
   /**
@@ -84,7 +170,7 @@ export class PublicBillingService {
     // Per il momento supportiamo solo il piano annuale in unica soluzione
     if (subscription.installmentPlan !== InstallmentPlan.ONE_SHOT) {
       throw new BadRequestException(
-        'Al momento è supportato solo il piano annuale con pagamento in un\'unica soluzione',
+        'Al momento e supportato solo il piano annuale con pagamento in un\'unica soluzione',
       );
     }
 
@@ -187,5 +273,114 @@ export class PublicBillingService {
         'Errore creazione Portal Session Stripe';
       throw new BadRequestException(msg);
     }
+  }
+
+  /**
+   * Prepara un PaymentIntent per permettere il pagamento inline via Stripe Payment Element
+   * senza redirect/nuove finestre.
+   */
+  async createInlinePaymentIntent(clientId: string) {
+    if (!clientId) {
+      throw new BadRequestException('Tenant non valido');
+    }
+
+    const subscription = await this.prismaPublic.subscription.findFirst({
+      where: { clientId },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: true },
+    });
+
+    if (!subscription || !subscription.plan) {
+      throw new BadRequestException(
+        'Nessuna subscription configurata per questo tenant',
+      );
+    }
+
+    if (subscription.installmentPlan !== InstallmentPlan.ONE_SHOT) {
+      throw new BadRequestException(
+        "Al momento e supportato solo il piano annuale con pagamento in un'unica soluzione",
+      );
+    }
+
+    const priceId: string | null = subscription.plan.stripePriceOneShotId || null;
+
+    if (!priceId) {
+      throw new BadRequestException(
+        'Piano Stripe non configurato per questa rateizzazione',
+      );
+    }
+
+    const stripeCustomerId = await this.ensureStripeCustomer(clientId);
+
+    const { paymentIntent, stripeSubscriptionId, reused } =
+      await this.createOrReuseInlinePaymentIntent({
+        subscription,
+        priceId,
+        clientId,
+        stripeCustomerId,
+      });
+
+    // Aggiorna PUBLIC/TENANT con gli id Stripe della subscription creata o riutilizzata
+    if (
+      subscription.stripeSubscriptionId !== stripeSubscriptionId ||
+      subscription.stripeCustomerId !== stripeCustomerId
+    ) {
+      await this.prismaPublic.subscription.update({
+        where: { id: subscription.id },
+        data: {
+          stripeSubscriptionId,
+          stripeCustomerId,
+        },
+      });
+
+      try {
+        await this.prismaTenant.subscription.update({
+          where: { id: subscription.id },
+          data: {
+            stripeSubscriptionId,
+            stripeCustomerId,
+          },
+        });
+      } catch (e: any) {
+        if (e?.code !== 'P2025') {
+          throw e;
+        }
+      }
+    }
+
+    // Arricchisci il PaymentIntent con metadata utili per il debug (best effort)
+    try {
+      await this.stripe.sdk.paymentIntents.update(paymentIntent.id, {
+        metadata: {
+          clientId,
+          subscriptionId: subscription.id,
+        },
+      });
+    } catch (e) {
+      // non bloccare il flusso inline se il metadata non viene aggiornato
+    }
+
+    const baseUrl =
+      process.env.FRONTEND_BASE_URL ||
+      process.env.API_BASE_URL ||
+      'http://localhost:3000';
+    const returnUrl = `${baseUrl.replace(/\/+$/, '')}/settings/billing`;
+
+    return {
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      stripeSubscriptionId,
+      stripeCustomerId,
+      amount:
+        typeof paymentIntent.amount === 'number'
+          ? paymentIntent.amount / 100
+          : undefined,
+      currency: paymentIntent.currency
+        ? paymentIntent.currency.toUpperCase()
+        : subscription.plan.currency || 'EUR',
+      status: paymentIntent.status,
+      reused,
+      returnUrl,
+    };
   }
 }
