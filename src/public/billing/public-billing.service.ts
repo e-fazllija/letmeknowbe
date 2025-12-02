@@ -64,6 +64,32 @@ export class PublicBillingService {
     return stripeCustomerId;
   }
 
+  private resolvePriceId(
+    plan: {
+      stripePriceOneShotId?: string | null;
+      stripePriceQuarterId?: string | null;
+    },
+    installmentPlan: InstallmentPlan,
+  ): string {
+    const priceIdMap: Partial<
+      Record<InstallmentPlan, string | null | undefined>
+    > = {
+      [InstallmentPlan.ONE_SHOT]: plan.stripePriceOneShotId,
+      [InstallmentPlan.SEMESTRALE]:
+        plan.stripePriceQuarterId ?? plan.stripePriceOneShotId,
+      [InstallmentPlan.TRIMESTRALE]:
+        plan.stripePriceQuarterId ?? plan.stripePriceOneShotId,
+    };
+
+    const priceId = priceIdMap[installmentPlan];
+    if (!priceId) {
+      throw new BadRequestException(
+        'Piano Stripe non configurato per questa rateizzazione',
+      );
+    }
+    return priceId;
+  }
+
   private async createOrReuseInlinePaymentIntent({
     subscription,
     priceId,
@@ -183,22 +209,9 @@ export class PublicBillingService {
       );
     }
 
-    // Per il momento supportiamo solo il piano annuale in unica soluzione
-    if (subscription.installmentPlan !== InstallmentPlan.ONE_SHOT) {
-      throw new BadRequestException(
-        'Al momento e supportato solo il piano annuale con pagamento in un\'unica soluzione',
-      );
-    }
-
     const { plan } = subscription;
 
-    const priceId: string | null = plan.stripePriceOneShotId || null;
-
-    if (!priceId) {
-      throw new BadRequestException(
-        'Piano Stripe non configurato per questa rateizzazione',
-      );
-    }
+    const priceId = this.resolvePriceId(plan, subscription.installmentPlan);
 
     const customerId = await this.ensureStripeCustomer(clientId);
 
@@ -312,19 +325,10 @@ export class PublicBillingService {
       );
     }
 
-    if (subscription.installmentPlan !== InstallmentPlan.ONE_SHOT) {
-      throw new BadRequestException(
-        "Al momento e supportato solo il piano annuale con pagamento in un'unica soluzione",
-      );
-    }
-
-    const priceId: string | null = subscription.plan.stripePriceOneShotId || null;
-
-    if (!priceId) {
-      throw new BadRequestException(
-        'Piano Stripe non configurato per questa rateizzazione',
-      );
-    }
+    const priceId = this.resolvePriceId(
+      subscription.plan,
+      subscription.installmentPlan,
+    );
 
     const stripeCustomerId = await this.ensureStripeCustomer(clientId);
 

@@ -93,21 +93,114 @@ export class BillingService {
 
   async getSubscription(clientId: string) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
-    const sub = await (this.prisma as any).subscription.findFirst({ where: { clientId }, orderBy: { createdAt: 'desc' }, include: { plan: true } });
-    if (!sub) return { plan: 'BASIC', cycle: 'ANNUALE', status: 'ACTIVE' };
-    return { plan: sub.plan?.name || 'BASIC', cycle: sub.plan?.billingCycle || 'ANNUALE', status: sub.status, startsAt: sub.startsAt, nextBillingAt: sub.nextBillingAt };
+    const sub = await (this.prisma as any).subscription.findFirst({
+      where: { clientId },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: true },
+    });
+    if (!sub)
+      return {
+        id: undefined,
+        plan: 'BASIC',
+        cycle: 'ANNUALE',
+        status: 'ACTIVE',
+        installmentPlan: 'ONE_SHOT',
+      };
+    return {
+      id: sub.id,
+      plan: sub.plan?.name || 'BASIC',
+      cycle: sub.plan?.billingCycle || 'ANNUALE',
+      status: sub.status,
+      startsAt: sub.startsAt,
+      nextBillingAt: sub.nextBillingAt,
+      installmentPlan: sub.installmentPlan,
+    };
   }
 
   async updateSubscription(clientId: string, body: any) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
-    const existing = await (this.prisma as any).subscription.findFirst({ where: { clientId }, orderBy: { createdAt: 'desc' } });
-    const data: any = {};
-    if (typeof body?.status === 'string') data.status = body.status as any;
-    if (existing) {
-      return (this.prisma as any).subscription.update({ where: { id: existing.id }, data });
-    } else {
+    const publicSub = await (this.prismaPublic as any).subscription.findFirst({
+      where: { clientId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!publicSub) {
       throw new BadRequestException('Nessuna subscription esistente per il tenant');
     }
+
+    const tenantSub = await (this.prisma as any).subscription.findFirst({
+      where: { clientId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const data: any = {};
+    if (typeof body?.status === 'string') data.status = body.status as any;
+
+    const allowedPlans = ['ONE_SHOT', 'SEMESTRALE', 'TRIMESTRALE'];
+    if (typeof body?.installmentPlan === 'string') {
+      const inst = body.installmentPlan.toUpperCase();
+      if (!allowedPlans.includes(inst)) {
+        throw new BadRequestException('installmentPlan non valido');
+      }
+      if (publicSub.installmentPlan !== inst) {
+        data.installmentPlan = inst as any;
+        // Se cambia il piano, invalida la subscription Stripe cosi ne creiamo una nuova al prossimo checkout
+        data.stripeSubscriptionId = null;
+      }
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw new BadRequestException('Nessun campo aggiornabile fornito');
+    }
+
+    // Aggiorna PUBLIC (fonte di verita)
+    const updatedPublic = await (this.prismaPublic as any).subscription.update({
+      where: { id: publicSub.id },
+      data,
+    });
+
+    // Aggiorna o crea il mirror TENANT per evitare errori di allineamento
+    let updatedTenant: any = null;
+    if (tenantSub) {
+      updatedTenant = await (this.prisma as any).subscription.update({
+        where: { id: tenantSub.id },
+        data,
+      });
+    } else {
+      // Crea un record shadow minimale copiando i campi fondamentali dal PUBLIC
+      updatedTenant = await (this.prisma as any).subscription.create({
+        data: {
+          id: publicSub.id,
+          clientId,
+          subscriptionPlanId: publicSub.subscriptionPlanId,
+          amount: publicSub.amount as any,
+          currency: publicSub.currency,
+          contractTerm: publicSub.contractTerm,
+          installmentPlan:
+            data.installmentPlan ?? publicSub.installmentPlan ?? 'ONE_SHOT',
+          status: data.status ?? publicSub.status,
+          startsAt: publicSub.startsAt ?? undefined,
+          nextBillingAt: publicSub.nextBillingAt ?? undefined,
+          endsAt: publicSub.endsAt ?? undefined,
+          stripeSubscriptionId:
+            data.stripeSubscriptionId ?? publicSub.stripeSubscriptionId ?? undefined,
+          stripeCustomerId: publicSub.stripeCustomerId ?? undefined,
+        },
+      });
+    }
+
+    // Allineamento del ritorno con l'ultimo stato
+    return {
+      ...updatedTenant,
+      installmentPlan:
+        (data.installmentPlan as any) ??
+        updatedTenant?.installmentPlan ??
+        publicSub.installmentPlan,
+      status: (data.status as any) ?? updatedTenant?.status ?? publicSub.status,
+      nextBillingAt: updatedTenant?.nextBillingAt ?? publicSub.nextBillingAt,
+      startsAt: updatedTenant?.startsAt ?? publicSub.startsAt,
+      endsAt: updatedTenant?.endsAt ?? publicSub.endsAt,
+      plan: tenantSub?.plan ?? undefined,
+    };
   }
 
   async getPaymentMethod(clientId: string) {
