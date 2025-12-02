@@ -16,6 +16,12 @@ export class PlatformClientsController {
     return this.service.findAll();
   }
 
+  @Get(':id/subscriptions')
+  @ApiOperation({ summary: 'Sottoscrizioni con ultimo metodo di pagamento' })
+  findSubscriptions(@Param('id') id: string) {
+    return this.service.findSubscriptions(id);
+  }
+
   @Get(':id/invoices')
   @ApiOperation({ summary: 'Fatture e ricevute Stripe per client' })
   findInvoices(@Param('id') id: string) {

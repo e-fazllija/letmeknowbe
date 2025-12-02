@@ -31,6 +31,36 @@ export class PlatformClientsService {
     return client;
   }
 
+  async findSubscriptions(id: string) {
+    const client = await this.publicPrisma.client.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!client) throw new NotFoundException('Client non trovato');
+
+    const subs = await this.publicPrisma.subscription.findMany({
+      where: { clientId: id },
+      select: {
+        id: true,
+        clientId: true,
+        amount: true,
+        currency: true,
+        contractTerm: true,
+        status: true,
+        createdAt: true,
+        startsAt: true,
+        endsAt: true,
+        lastPayment: { select: { method: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return subs.map(({ lastPayment, ...rest }) => ({
+      ...rest,
+      method: lastPayment?.method ?? null,
+    }));
+  }
+
   async findInvoices(id: string) {
     const client = await this.publicPrisma.client.findUnique({
       where: { id },
