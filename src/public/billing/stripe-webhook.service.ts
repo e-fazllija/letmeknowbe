@@ -412,6 +412,13 @@ export class StripeWebhookService {
         (typeof subscription.status === 'string' &&
           subscription.status.toUpperCase() === 'PENDING_PAYMENT');
 
+      // Primo pagamento: ancora il periodo al pagamento effettivo
+      // (per es. abbonamento annuale = 1 anno dal primo pagamento, non dall'iscrizione)
+      if (wasPending && paymentDate) {
+        periodStart = paymentDate;
+        periodEnd = undefined;
+      }
+
       // Integra/valida il periodo usando la subscription Stripe (best effort)
       if (stripeSubscriptionId) {
         try {
@@ -521,13 +528,18 @@ export class StripeWebhookService {
       }
 
       // Aggiorna stato CLIENT (PUBLIC + TENANT) in ACTIVE e attiva activatedAt (best effort)
-      if (publicSubUpdated.firstPaidAt) {
+      if (publicSubUpdated.status === PublicSubscriptionStatus.ACTIVE) {
+        const activatedAt =
+          publicSubUpdated.firstPaidAt ??
+          paymentDate ??
+          publicSubUpdated.startsAt ??
+          new Date();
         try {
           await (this.prismaPublic as any).client.update({
             where: { id: client.id },
             data: {
               status: PublicClientStatus.ACTIVE,
-              activatedAt: publicSubUpdated.firstPaidAt,
+              activatedAt,
             },
           });
         } catch (e: any) {
@@ -541,7 +553,7 @@ export class StripeWebhookService {
             where: { id: client.id },
             data: {
               status: TenantClientStatus.ACTIVE,
-              activatedAt: publicSubUpdated.firstPaidAt,
+              activatedAt,
             },
           });
         } catch (e: any) {
@@ -754,6 +766,45 @@ export class StripeWebhookService {
           'Errore aggiornamento Subscription (TENANT) da customer.subscription.updated',
           e,
         );
+      }
+    }
+
+    // Se la subscription è diventata ACTIVE, prova ad allineare anche lo stato del Client
+    if (publicSubUpdated.status === PublicSubscriptionStatus.ACTIVE) {
+      const activatedAt =
+        publicSubUpdated.firstPaidAt ??
+        publicSubUpdated.startsAt ??
+        new Date();
+      const clientId = publicSubUpdated.clientId;
+      if (clientId) {
+        try {
+          await (this.prismaPublic as any).client.update({
+            where: { id: clientId },
+            data: {
+              status: PublicClientStatus.ACTIVE,
+              activatedAt,
+            },
+          });
+        } catch (e: any) {
+          this.logger.error(
+            'Errore aggiornamento Client (PUBLIC) da customer.subscription.updated',
+            e,
+          );
+        }
+        try {
+          await (this.prismaTenant as any).client.update({
+            where: { id: clientId },
+            data: {
+              status: TenantClientStatus.ACTIVE,
+              activatedAt,
+            },
+          });
+        } catch (e: any) {
+          this.logger.error(
+            'Errore aggiornamento Client (TENANT) da customer.subscription.updated',
+            e,
+          );
+        }
       }
     }
   }

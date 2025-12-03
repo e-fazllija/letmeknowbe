@@ -92,13 +92,18 @@ export class BillingService {
   }
 
   async getSubscription(clientId: string) {
-    if (!clientId) throw new BadRequestException('Tenant non valido');
-    const sub = await (this.prisma as any).subscription.findFirst({
+    if (!clientId) {
+      throw new BadRequestException('Tenant non valido');
+    }
+
+    // PUBLIC = fonte di verità per billing/subscription
+    const sub = await (this.prismaPublic as any).subscription.findFirst({
       where: { clientId },
       orderBy: { createdAt: 'desc' },
       include: { plan: true },
     });
-    if (!sub)
+
+    if (!sub) {
       return {
         id: undefined,
         plan: 'BASIC',
@@ -106,6 +111,8 @@ export class BillingService {
         status: 'ACTIVE',
         installmentPlan: 'ONE_SHOT',
       };
+    }
+
     return {
       id: sub.id,
       plan: sub.plan?.name || 'BASIC',
@@ -116,6 +123,8 @@ export class BillingService {
       installmentPlan: sub.installmentPlan,
     };
   }
+
+
 
   async updateSubscription(clientId: string, body: any) {
     if (!clientId) throw new BadRequestException('Tenant non valido');
