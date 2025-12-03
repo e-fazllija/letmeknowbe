@@ -55,7 +55,6 @@ export class SubscriptionService {
           installmentPlan: dto.installmentPlan,
           status: dto.status ?? SubscriptionStatus.ACTIVE,
           startsAt,
-          nextBillingAt: dto.nextBillingAt ? new Date(dto.nextBillingAt) : undefined,
           endsAt,
         },
       });

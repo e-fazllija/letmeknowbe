@@ -105,7 +105,6 @@ export class ClientService {
           // Stato iniziale: PENDING_PAYMENT fino al primo pagamento riuscito
           status: SubscriptionStatus.PENDING_PAYMENT,
           startsAt,
-          nextBillingAt: dto.subscription.nextBillingAt ? new Date(dto.subscription.nextBillingAt) : undefined,
           endsAt,
         },
       });
