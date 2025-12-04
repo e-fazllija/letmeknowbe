@@ -462,8 +462,16 @@ export class StripeWebhookService {
       }
 
       // Se manca periodEnd o è uguale/inferiore a periodStart, calcola un fallback sul ciclo (mensile/annuale)
-      const cycleMonths =
-        (plan?.billingCycle as string | undefined) === 'MENSILE' ? 1 : 12;
+      let cycleMonths: number;
+      const installment = (subscription.installmentPlan as string | undefined) || undefined;
+      if (installment === 'TRIMESTRALE') {
+        cycleMonths = 3;
+      } else if (installment === 'SEMESTRALE') {
+        cycleMonths = 6;
+      } else {
+        cycleMonths =
+          (plan?.billingCycle as string | undefined) === 'MENSILE' ? 1 : 12;
+      }
       if (!periodStart) {
         periodStart = paymentDate ?? subscription.startsAt ?? new Date();
       }
@@ -483,6 +491,9 @@ export class StripeWebhookService {
         lastPaymentId: publicPayment.id,
         status: PublicSubscriptionStatus.ACTIVE,
         nextBillingAt: effectiveNextBillingAt ?? undefined,
+        // Allinea l'importo di Subscription all'ultimo importo fatturato da Stripe
+        amount,
+        currency,
       };
 
       // Aggiorna il periodo corrente pagato se presente sull'invoice

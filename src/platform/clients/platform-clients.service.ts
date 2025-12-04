@@ -15,12 +15,27 @@ export class PlatformClientsService {
     private readonly tenantPrisma: PrismaTenantService,
   ) {}
 
-  findAll() {
-    return this.publicPrisma.client.findMany({
-      include: { subscriptions: true },
+    async findAll() {
+    const clients = await this.publicPrisma.client.findMany({
+      include: {
+        subscriptions: {
+          include: {
+            lastPayment: { select: { method: true } },
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
+
+    return clients.map((c: any) => ({
+      ...c,
+      subscriptions: c.subscriptions.map(({ lastPayment, ...rest }: any) => ({
+        ...rest,
+        method: lastPayment?.method ?? null,
+      })),
+    }));
   }
+
 
   async findOne(id: string) {
     const client = await this.publicPrisma.client.findUnique({
@@ -50,6 +65,7 @@ export class PlatformClientsService {
         createdAt: true,
         startsAt: true,
         endsAt: true,
+        nextBillingAt: true,
         lastPayment: { select: { method: true } },
       },
       orderBy: { createdAt: 'desc' },

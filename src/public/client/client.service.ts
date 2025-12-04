@@ -81,7 +81,9 @@ export class ClientService {
       if (!plan) throw new BadRequestException('subscriptionPlanId non valido');
 
       // Calcola periodo contrattuale (annualità evolutiva)
-      const startsAt = dto.subscription.startsAt ? new Date(dto.subscription.startsAt) : new Date();
+      const startsAt = dto.subscription.startsAt
+        ? new Date(dto.subscription.startsAt)
+        : new Date();
       let endsAt: Date | undefined;
       if (dto.subscription.endsAt) {
         endsAt = new Date(dto.subscription.endsAt);
@@ -93,15 +95,26 @@ export class ClientService {
         endsAt = base;
       }
 
+      // Default lato BE per amount/currency/installmentPlan in base al piano
+      const amountInput =
+        dto.subscription.amount != null
+          ? dto.subscription.amount
+          : ((plan.price as any) ?? 0);
+      const currency = dto.subscription.currency ?? plan.currency ?? 'EUR';
+      const contractTerm =
+        dto.subscription.contractTerm ?? ContractTerm.ONE_YEAR;
+      const installmentPlan =
+        dto.subscription.installmentPlan ?? (InstallmentPlan.ONE_SHOT as any);
+
       // 3) Crea Subscription nel PUBLIC (schema aggiornato)
       const sub = await this.publicPrisma.subscription.create({
         data: {
           client: { connect: { id: createdClient.id } },
           plan: { connect: { id: plan.id } },
-          amount: new PublicPrisma.Decimal(dto.subscription.amount),
-          currency: dto.subscription.currency ?? 'EUR',
-          contractTerm: dto.subscription.contractTerm,
-          installmentPlan: dto.subscription.installmentPlan ?? (InstallmentPlan.ONE_SHOT as any),
+          amount: new PublicPrisma.Decimal(amountInput),
+          currency,
+          contractTerm,
+          installmentPlan,
           // Stato iniziale: PENDING_PAYMENT fino al primo pagamento riuscito
           status: SubscriptionStatus.PENDING_PAYMENT,
           startsAt,
