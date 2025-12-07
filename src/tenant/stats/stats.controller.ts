@@ -1,6 +1,7 @@
 import { Controller, Get, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ActiveClientGuard } from '../../common/guards/active-client.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/guards/roles.decorator';
 import { Request } from 'express';
@@ -8,7 +9,7 @@ import { StatsService } from './stats.service';
 
 @ApiTags('tenant-stats')
 @ApiBearerAuth('access-token')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ActiveClientGuard, RolesGuard)
 @Controller('tenant/stats')
 export class StatsController {
   constructor(private service: StatsService) {}

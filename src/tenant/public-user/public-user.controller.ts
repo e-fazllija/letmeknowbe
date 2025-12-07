@@ -4,13 +4,14 @@ import { PublicUserService } from './public-user.service';
 import { CreatePublicUserDto } from './dto/create-public-user.dto';
 import { UpdatePublicUserDto } from './dto/update-public-user.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ActiveClientGuard } from '../../common/guards/active-client.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/guards/roles.decorator';
 import { Request } from 'express';
 
 @ApiTags('tenant/public-users')
 @ApiBearerAuth('access-token')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ActiveClientGuard, RolesGuard)
 @Roles('ADMIN')
 @Controller('v1/tenant/public-users')
 export class PublicUserController {

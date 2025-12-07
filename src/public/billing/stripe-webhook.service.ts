@@ -301,18 +301,28 @@ export class StripeWebhookService {
       return;
     }
 
-    // Trova la Subscription PUBLIC collegata (prima per stripeSubscriptionId, fallback su clientId)
+    // Prova a risalire alla Subscription PUBLIC collegata (se esiste)
     let subscription: any = null;
     if (stripeSubscriptionId) {
       subscription = await (this.prismaPublic as any).subscription.findFirst({
         where: { stripeSubscriptionId },
         orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          clientId: true,
+          firstPaidAt: true,
+        },
       });
     }
     if (!subscription) {
       subscription = await (this.prismaPublic as any).subscription.findFirst({
         where: { clientId: client.id },
         orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          clientId: true,
+          firstPaidAt: true,
+        },
       });
     }
 
@@ -619,8 +629,11 @@ export class StripeWebhookService {
   private async handleInvoicePaymentFailed(
     invoice: Stripe.Invoice,
   ): Promise<void> {
+
     const stripeCustomerId =
       (invoice.customer as string | null | undefined) || undefined;
+    const stripeSubscriptionId =
+      (invoice.subscription as string | null | undefined) || undefined;
 
     if (!stripeCustomerId) {
       this.logger.warn(
@@ -639,6 +652,31 @@ export class StripeWebhookService {
         `invoice.payment_failed: nessun Client trovato per stripeCustomerId=${stripeCustomerId}`,
       );
       return;
+    }
+
+    // Prova a risalire alla Subscription PUBLIC collegata (se esiste)
+    let subscription: any = null;
+    if (stripeSubscriptionId) {
+      subscription = await (this.prismaPublic as any).subscription.findFirst({
+        where: { stripeSubscriptionId },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          clientId: true,
+          firstPaidAt: true,
+        },
+      });
+    }
+    if (!subscription) {
+      subscription = await (this.prismaPublic as any).subscription.findFirst({
+        where: { clientId: client.id },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          clientId: true,
+          firstPaidAt: true,
+        },
+      });
     }
 
     const stripeInvoiceId = invoice.id;
@@ -715,6 +753,79 @@ export class StripeWebhookService {
         e,
       );
     }
+
+    // Se questo è il primo pagamento che fallisce (firstPaidAt non ancora valorizzato),
+    // mantieni/riporta Subscription e Client in PENDING_PAYMENT così restano lockati
+    if (subscription && !subscription.firstPaidAt) {
+      const subscriptionId = subscription.id;
+      const clientId = subscription.clientId ?? client.id;
+
+      // Subscription PUBLIC -> PENDING_PAYMENT
+      try {
+        await (this.prismaPublic as any).subscription.update({
+          where: { id: subscriptionId },
+          data: {
+            status: PublicSubscriptionStatus.PENDING_PAYMENT,
+          },
+        });
+      } catch (e: any) {
+        this.logger.error(
+          'Errore aggiornamento Subscription (PUBLIC) da invoice.payment_failed primo pagamento',
+          e,
+        );
+      }
+
+      // Subscription TENANT -> PENDING_PAYMENT (best effort)
+      try {
+        await (this.prismaTenant as any).subscription.update({
+          where: { id: subscriptionId },
+          data: {
+            status: TenantSubscriptionStatus.PENDING_PAYMENT,
+          },
+        });
+      } catch (e: any) {
+        if (e?.code !== 'P2025') {
+          this.logger.error(
+            'Errore aggiornamento Subscription (TENANT) da invoice.payment_failed primo pagamento',
+            e,
+          );
+        }
+      }
+
+      // Client PUBLIC -> PENDING_PAYMENT, activatedAt azzerato
+      try {
+        await (this.prismaPublic as any).client.update({
+          where: { id: clientId },
+          data: {
+            status: PublicClientStatus.PENDING_PAYMENT,
+            activatedAt: null,
+          },
+        });
+      } catch (e: any) {
+        this.logger.error(
+          'Errore aggiornamento Client (PUBLIC) da invoice.payment_failed primo pagamento',
+          e,
+        );
+      }
+
+      // Client TENANT -> PENDING_PAYMENT, activatedAt azzerato (best effort)
+      try {
+        await (this.prismaTenant as any).client.update({
+          where: { id: clientId },
+          data: {
+            status: TenantClientStatus.PENDING_PAYMENT,
+            activatedAt: null,
+          },
+        });
+      } catch (e: any) {
+        if (e?.code !== 'P2025') {
+          this.logger.error(
+            'Errore aggiornamento Client (TENANT) da invoice.payment_failed primo pagamento',
+            e,
+          );
+        }
+      }
+    }
   }
 
   private async handleCustomerSubscriptionUpdated(
@@ -750,11 +861,29 @@ export class StripeWebhookService {
       return;
     }
 
+    const wasPendingPayment =
+      publicSub.status === PublicSubscriptionStatus.PENDING_PAYMENT ||
+      (typeof publicSub.status === 'string' &&
+        (publicSub.status as string).toUpperCase() === 'PENDING_PAYMENT');
+    const isBeforeFirstPayment = !publicSub.firstPaidAt;
+
+    // Evita che un semplice customer.subscription.updated con status "active" per
+    // metodi asincroni (es. SEPA) promuova la subscription da PENDING_PAYMENT ad ACTIVE
+    // prima che arrivi una invoice.payment_succeeded.
+    const shouldIgnoreActivation =
+      wasPendingPayment &&
+      isBeforeFirstPayment &&
+      mappedStatus === PublicSubscriptionStatus.ACTIVE;
+
+    const effectiveStatus = shouldIgnoreActivation
+      ? publicSub.status
+      : mappedStatus;
+
     const publicSubUpdated = await (this.prismaPublic as any).subscription.update(
       {
         where: { id: publicSub.id },
         data: {
-          status: mappedStatus,
+          status: effectiveStatus,
           nextBillingAt: nextBillingAt ?? publicSub.nextBillingAt,
           endsAt: endsAt ?? publicSub.endsAt,
         },
@@ -762,11 +891,18 @@ export class StripeWebhookService {
     );
 
     // Shadow update nel TENANT
+    const mappedTenantStatus = this.mapStripeSubscriptionStatusTenant(
+      stripeSub.status,
+    );
+    const effectiveTenantStatus = shouldIgnoreActivation
+      ? TenantSubscriptionStatus.PENDING_PAYMENT
+      : mappedTenantStatus;
+
     try {
       await (this.prismaTenant as any).subscription.update({
         where: { id: publicSub.id },
         data: {
-          status: this.mapStripeSubscriptionStatusTenant(stripeSub.status),
+          status: effectiveTenantStatus,
           nextBillingAt: publicSubUpdated.nextBillingAt,
           endsAt: publicSubUpdated.endsAt,
         },
@@ -777,6 +913,72 @@ export class StripeWebhookService {
           'Errore aggiornamento Subscription (TENANT) da customer.subscription.updated',
           e,
         );
+      }
+    }
+
+          // Aggiorna lo stato del Client in base allo stato della subscription (rinnovi / cancellazioni)
+    const clientIdForStatus = publicSubUpdated.clientId;
+    if (clientIdForStatus) {
+      // Caso 1: mancato pagamento che supera il periodo di tolleranza (Stripe porta la subscription a "unpaid")
+      if (stripeSub.status === 'unpaid') {
+        try {
+          await (this.prismaPublic as any).client.update({
+            where: { id: clientIdForStatus },
+            data: {
+              status: PublicClientStatus.SUSPENDED,
+            },
+          });
+        } catch (e: any) {
+          this.logger.error(
+            'Errore aggiornamento Client (PUBLIC) da customer.subscription.updated unpaid',
+            e,
+          );
+        }
+        try {
+          await (this.prismaTenant as any).client.update({
+            where: { id: clientIdForStatus },
+            data: {
+              status: TenantClientStatus.SUSPENDED,
+            },
+          });
+        } catch (e: any) {
+          this.logger.error(
+            'Errore aggiornamento Client (TENANT) da customer.subscription.updated unpaid',
+            e,
+          );
+        }
+      }
+      // Caso 2: cancellazione/termine servizio: subscription CANCELED/EXPIRED -> account archiviato
+      else if (
+        effectiveStatus === PublicSubscriptionStatus.CANCELED ||
+        effectiveStatus === PublicSubscriptionStatus.EXPIRED
+      ) {
+        try {
+          await (this.prismaPublic as any).client.update({
+            where: { id: clientIdForStatus },
+            data: {
+              status: PublicClientStatus.ARCHIVED,
+            },
+          });
+        } catch (e: any) {
+          this.logger.error(
+            'Errore aggiornamento Client (PUBLIC) da customer.subscription.updated canceled/expired',
+            e,
+          );
+        }
+        try {
+          await (this.prismaTenant as any).client.update({
+            where: { id: clientIdForStatus },
+            data: {
+              status: TenantClientStatus.ARCHIVED,
+            },
+          });
+        } catch (e: any) {
+          this.logger.error(
+            'Errore aggiornamento Client (TENANT) da customer.subscription.updated canceled/expired',
+            e,
+          );
+        }
       }
     }
 

@@ -124,6 +124,74 @@ export class BillingService {
     };
   }
 
+  /**
+   * Ritorna uno snapshot sintetico dello stato billing/tenant
+   * utile al FE per decidere se mostrare un lock di pagamento.
+   */
+  async getBillingStatus(clientId: string) {
+    if (!clientId) {
+      throw new BadRequestException('Tenant non valido');
+    }
+
+    const client = await (this.prisma as any).client.findUnique({
+      where: { id: clientId },
+      select: { status: true },
+    });
+    if (!client) {
+      throw new NotFoundException('Tenant non trovato');
+    }
+
+    const lastPayment = await (this.prisma as any).payment.findFirst({
+      where: { clientId },
+      orderBy: [
+        { paymentDate: 'desc' as any },
+        { createdAt: 'desc' as any },
+      ],
+      select: { status: true },
+    });
+
+    const lastSub = await (this.prismaPublic as any).subscription.findFirst({
+      where: { clientId },
+      orderBy: { createdAt: 'desc' },
+      select: { status: true },
+    });
+
+    const clientStatus = ((client.status as any) || '').toString();
+    const subscriptionStatus = lastSub
+      ? ((lastSub.status as any) || '').toString()
+      : undefined;
+
+    const billingLocked =
+      clientStatus === 'PENDING_PAYMENT' || clientStatus === 'SUSPENDED';
+
+    const lastPaymentStatus = (
+      (lastPayment?.status as any) || ''
+    )
+      .toString()
+      .toUpperCase();
+
+    let lockMessage: string | undefined;
+    if (clientStatus === 'PENDING_PAYMENT') {
+      lockMessage =
+        lastPaymentStatus === 'FAILED'
+          ? 'Tenant in attesa di pagamento: l\'ultimo tentativo di pagamento è fallito. Completa il pagamento nella sezione fatturazione.'
+          : 'Tenant in attesa di pagamento: completa il pagamento per continuare.';
+    } else if (clientStatus === 'SUSPENDED') {
+      lockMessage =
+        'Tenant sospeso per mancato pagamento: aggiorna il metodo di pagamento per riattivare l\'accesso.';
+    } else if (clientStatus === 'ARCHIVED') {
+      lockMessage = 'Tenant archiviato: l\'account non è più attivo.';
+    }
+
+    return {
+      clientStatus,
+      subscriptionStatus,
+      billingLocked,
+      lockMessage,
+      lastPaymentStatus: lastPaymentStatus || undefined,
+    };
+  }
+
 
 
   async updateSubscription(clientId: string, body: any) {

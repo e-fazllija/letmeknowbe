@@ -5,6 +5,7 @@ import { ReportService } from './report.service';
 import { CreateReportStatusDto } from './dto/create-report-status.dto';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags, ApiExcludeEndpoint } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ActiveClientGuard } from '../../common/guards/active-client.guard';
 import { Request } from 'express';
 import { Response } from 'express';
 import { CreateTenantReportDto } from './dto/create-tenant-report.dto';
@@ -28,7 +29,7 @@ export class ReportController {
 
   // CREA NUOVA SEGNALAZIONE (TENANT, BACKOFFICE)
   @Post()
-  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, ActiveClientGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Crea una segnalazione (backoffice) con payload unificato' })
@@ -48,7 +49,7 @@ export class ReportController {
 
   // DETTAGLIO SEGNALAZIONE (TENANT) CON AUTO-ACK ALLA PRIMA LETTURA
   @Get(':reportId')
-  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, ActiveClientGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT', 'AUDITOR')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Dettaglio segnalazione (auto-ack alla prima lettura)' })
@@ -59,7 +60,7 @@ export class ReportController {
 
   // ELENCO ALLEGATI DELLA SEGNALAZIONE
   @Get(':reportId/attachments')
-  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, ActiveClientGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Elenco allegati (metadata) della segnalazione' })
@@ -70,7 +71,7 @@ export class ReportController {
 
   // DOWNLOAD allegato (stream via BE)
   @Get(':reportId/attachments/:attachmentId/download')
-  @UseGuards(JwtAuthGuard, AuditorAllowlistGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, ActiveClientGuard, AuditorAllowlistGuard, RolesGuard)
   @Roles('ADMIN', 'AGENT')
   @ApiBearerAuth('access-token')
   @ApiOperation({ summary: 'Scarica un allegato (stream via backend)' })

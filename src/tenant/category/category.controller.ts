@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ActiveClientGuard } from '../../common/guards/active-client.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/guards/roles.decorator';
 import { Request } from 'express';
@@ -10,7 +11,7 @@ import { UpdateCategoryDto } from './dto/update-category.dto';
 
 @ApiTags('tenant-categories')
 @ApiBearerAuth('access-token')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ActiveClientGuard, RolesGuard)
 @Controller('tenant/categories')
 export class CategoryController {
   constructor(private service: CategoryService) {}

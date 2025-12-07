@@ -4,6 +4,7 @@ import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { ActiveClientGuard } from '../../common/guards/active-client.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/guards/roles.decorator';
 import { Request } from 'express';
@@ -11,7 +12,7 @@ import { InviteUserDto } from './dto/invite-user.dto';
 
 @ApiTags('tenant-users')
 @ApiBearerAuth('access-token')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, ActiveClientGuard, RolesGuard)
 @Roles('ADMIN')
 @Controller('tenant/users')
 export class UserController {

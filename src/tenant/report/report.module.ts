@@ -12,11 +12,12 @@ import { ReportRetentionScheduler } from './report-retention.scheduler';
 import { StorageModule } from '../../storage/storage.module';
 import { NotificationsModule } from '../../common/notifications/notifications.module';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { ActiveClientGuard } from '../../common/guards/active-client.guard';
 
 @Module({
   imports: [TenantModule, JwtModule.register({}), StorageModule, NotificationsModule],
   controllers: [ReportController],
-  providers: [ReportService, JwtAuthGuard, RolesGuard, ReportSlaScheduler, ReportTranscriptionScheduler, AttachmentScanScheduler, ReportRetentionScheduler],
+  providers: [ReportService, JwtAuthGuard, RolesGuard, ActiveClientGuard, ReportSlaScheduler, ReportTranscriptionScheduler, AttachmentScanScheduler, ReportRetentionScheduler],
   exports: [ReportService],
 })
 export class ReportModule {}

@@ -57,5 +57,17 @@ export class BillingController {
     const clientId = (req as any)?.user?.clientId as string;
     return this.service.updatePaymentMethod(clientId, body);
   }
+
+  @Get('billing/status')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Stato sintetico billing/tenant (lock)',
+    description:
+      'Ritorna clientStatus/subscriptionStatus e se il tenant è bloccato per pagamento (PENDING_PAYMENT o SUSPENDED).',
+  })
+  getBillingStatus(@Req() req: Request) {
+    const clientId = (req as any)?.user?.clientId as string;
+    return this.service.getBillingStatus(clientId);
+  }
 }
 
