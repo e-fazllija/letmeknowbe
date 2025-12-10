@@ -13,11 +13,32 @@ import { StorageModule } from '../../storage/storage.module';
 import { NotificationsModule } from '../../common/notifications/notifications.module';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { ActiveClientGuard } from '../../common/guards/active-client.guard';
+import { JobLockService } from '../../common/job-lock.service';
+import { PrismaPublicService } from '../../public/prisma-public.service';
+import { SlaOrchestratorService } from './sla-orchestrator.service';
+import { SlaPerTenantService } from './sla-per-tenant.service';
+import { RetentionOrchestratorService } from './retention-orchestrator.service';
+import { RetentionPerTenantService } from './retention-per-tenant.service';
 
 @Module({
   imports: [TenantModule, JwtModule.register({}), StorageModule, NotificationsModule],
   controllers: [ReportController],
-  providers: [ReportService, JwtAuthGuard, RolesGuard, ActiveClientGuard, ReportSlaScheduler, ReportTranscriptionScheduler, AttachmentScanScheduler, ReportRetentionScheduler],
+  providers: [
+    ReportService,
+    JwtAuthGuard,
+    RolesGuard,
+    ActiveClientGuard,
+    PrismaPublicService,
+    JobLockService,
+    SlaOrchestratorService,
+    SlaPerTenantService,
+    RetentionOrchestratorService,
+    RetentionPerTenantService,
+    ReportSlaScheduler,
+    ReportTranscriptionScheduler,
+    AttachmentScanScheduler,
+    ReportRetentionScheduler,
+  ],
   exports: [ReportService],
 })
 export class ReportModule {}

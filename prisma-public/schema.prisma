@@ -117,6 +117,16 @@ model StripeWebhookEvent {
   @@index([type, processed])
 }
 
+model JobLock {
+  jobName     String   @id
+  lockedUntil DateTime?
+  owner       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("job_lock")
+}
+
 enum PaymentMethod {
   CARTA
   BONIFICO
