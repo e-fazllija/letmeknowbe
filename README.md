@@ -271,3 +271,43 @@ Nota: Il BE imposta `access_token` e `refresh_token` come cookie HttpOnly; il FE
 
 ## Logging
 - `HTTP_LOG_ENABLED` → se true, stampa un log sintetico per ogni richiesta con `x-request-id`, metodo, URL, status e durata.
+## Deploy su Azure (API)
+
+### Env / Configuration
+
+- Usa `backend/.env.production.example` come riferimento per le Application Settings di Azure.
+- Crea almeno due set di configurazione:
+  - **Azure Test** (senza dominio custom): usa gli URL `https://lmk-api-test.azurewebsites.net/v1` e `https://lmk-frontend-test.azurewebsites.net`, CSRF disabilitato (`CSRF_PROTECTION=false`), antivirus disabilitato e retention in DRY RUN.
+  - **Produzione** (con dominio custom): `API_BASE_URL=https://api.let-me-know.it/v1`, `FRONTEND_BASE_URL=https://app.let-me-know.it`, CORS su `https://app.let-me-know.it`, `COOKIE_DOMAIN=let-me-know.it`, CSRF abilitato (`CSRF_PROTECTION=true`), antivirus attivo e retention reale (`RETENTION_DRY_RUN=false`).
+
+### Migrazioni database
+
+Prima del primo avvio in ogni ambiente (test/prod), esegui:
+
+```bash
+npx prisma migrate deploy --schema prisma-public/schema.prisma
+npx prisma migrate deploy --schema prisma-tenant/schema.prisma
+```
+
+Assicurati che `PUBLIC_DATABASE_URL` e `TENANT_DATABASE_URL` puntino ai database corretti (PostgreSQL Azure) e che siano accessibili dall’App Service.
+
+### Job SLA / Retention
+
+- I job SLA e Retention sono globali e in-process:
+  - usano la tabella `job_lock` nel DB PUBLIC per garantire che, anche con più istanze, ad ogni intervallo venga eseguito un solo `runOnceGlobal()` per job.
+- **SLA Reminder**:
+  - legge i tenant attivi dal DB PUBLIC (con eventuale `TENANT_ID_ALLOWLIST`),
+  - per ciascun tenant esegue la logica per-tenant (messaggi SYSTEM/PUBLIC `SLA_ACK_REMINDER_D*`, `SLA_RESPONSE_REMINDER_D*`, `SLA_OVERDUE`, `PUBLIC_RECEIPT`),
+  - log sintetico: `SLA_RUN_OK tenants=N messages=M`.
+- **Data Retention**:
+  - legge i tenant attivi dal DB PUBLIC,
+  - per ciascun tenant seleziona i report scaduti in base a `DATA_RETENTION_DAYS`/`DATA_RETENTION_YEARS`,
+  - se `RETENTION_DRY_RUN=true` → non cancella, aggiorna solo `retentionAt` e logga `"Retention dry-run: would purge report"`,
+  - se `RETENTION_DRY_RUN=false` → cancella report, allegati e righe correlate, e logga `RETENTION_RUN_OK tenants=N deleted=K dryRun=false`.
+
+### Monitoraggio (consigliato)
+
+- In Application Insights configura alert:
+  - se non vedi `SLA_RUN_OK` negli ultimi X ore (es. 6h) → alert,
+  - se non vedi `RETENTION_RUN_OK` nelle ultime 24h → alert.
+- Aggiungi anche alert su errori 5xx ed eccezioni non gestite per l’App Service.

@@ -153,7 +153,7 @@ export class PublicVoiceService {
       const ext = getExt(a.fileName);
       const allowedExt = EXT_FOR_MIME[a.mimeType] || [];
       if (!allowedExt.includes(ext)) throw new BadRequestException('Estensione incoerente con MIME');
-      if (!a.storageKey || !a.storageKey.startsWith(`${tenantId}/`)) throw new BadRequestException('storageKey non valido');
+      if (!a.storageKey || !a.storageKey.startsWith(`${tenantId}/tmp/`)) throw new BadRequestException('storageKey non valido');
       const requireProof = isTrue(process.env.PRESIGN_PROOF_REQUIRED);
       if (requireProof) {
         const proofSecret = process.env.PRESIGN_PROOF_SECRET || 'dev_presign_proof_secret';

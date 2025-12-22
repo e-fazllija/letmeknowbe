@@ -40,8 +40,8 @@ export const validationSchema = Joi.object({
   PLATFORM_IP_ALLOWLIST: Joi.string().optional(),
   PLATFORM_PROTECT_PUBLIC_ADMIN: Joi.boolean().truthy('true', '1').falsy('false', '0').default(false),
 
-  // Storage (S3/MinIO)
-  STORAGE_PROVIDER: Joi.string().valid('S3').allow('', null),
+  // Storage (S3/MinIO/Azure)
+  STORAGE_PROVIDER: Joi.string().valid('S3', 'AZURE_BLOB').allow('', null),
   S3_ENDPOINT: Joi.string().uri().allow('', null),
   S3_REGION: Joi.string().default('us-east-1'),
   S3_ACCESS_KEY: Joi.string().allow('', null),
@@ -50,6 +50,9 @@ export const validationSchema = Joi.object({
   S3_BUCKET_ATTACH: Joi.string().allow('', null),
   S3_SSE_MODE: Joi.string().valid('NONE', 'S3', 'KMS').default('S3'),
   S3_KMS_KEY_ID: Joi.string().allow('', null),
+  AZURE_STORAGE_ACCOUNT: Joi.string().allow('', null),
+  AZURE_STORAGE_KEY: Joi.string().allow('', null),
+  AZURE_STORAGE_ENDPOINT: Joi.string().uri().allow('', null),
   UPLOAD_FINALIZE_SECRET: Joi.string().allow('', null),
 
   // Antivirus / Scansione allegati

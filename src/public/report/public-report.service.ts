@@ -486,7 +486,7 @@ export class PublicReportService {
       const ext = getExt(a.fileName);
       const allowedExt = EXT_FOR_MIME[a.mimeType] || [];
       if (!allowedExt.includes(ext)) throw new BadRequestException('Estensione incoerente con MIME');
-      if (!a.storageKey || !a.storageKey.startsWith(`${tenantId}/`)) throw new BadRequestException('storageKey non valido');
+      if (!a.storageKey || !a.storageKey.startsWith(`${tenantId}/tmp/`)) throw new BadRequestException('storageKey non valido');
       if (a.sizeBytes > maxFileBytes) throw new PayloadTooLargeException('File oltre il limite');
       total += a.sizeBytes || 0;
       if (total > maxTotalBytes) throw new PayloadTooLargeException('Dimensione totale oltre il limite');
