@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import { PrismaPublicService } from '../prisma-public.service';
 import { PrismaTenantService } from './../../tenant/prisma-tenant.service';
+import { NotificationsService } from '../../common/notifications/notifications.service';
+
 
 //  Import robusto dal client generato:
 // - PublicPrisma = namespace con i TIPI (PublicPrisma.ClientStatus, .Decimal, …)
@@ -14,7 +16,10 @@ import {
   Prisma as PublicPrisma,
   ClientStatus,
   SubscriptionStatus,
+  InstallmentPlan,
+  ContractTerm,
 } from '../../generated/public';
+import * as crypto from 'crypto';
 
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
@@ -25,6 +30,7 @@ export class ClientService {
   constructor(
     private publicPrisma: PrismaPublicService,
     private tenantPrisma: PrismaTenantService,
+    private notify: NotificationsService,
   ) {}
 
   /**
@@ -39,7 +45,8 @@ export class ClientService {
       companyName: dto.client.companyName,
       contactEmail: dto.client.contactEmail,
       employeeRange: dto.client.employeeRange,
-      status: dto.client.status ?? ClientStatus.ACTIVE, //  runtime enum
+      // Nuovi tenant creati sempre in PENDING_PAYMENT fino al primo pagamento
+      status: ClientStatus.PENDING_PAYMENT,
 
       // Billing (fonte di verità in PUBLIC)
       billingTaxId: dto.client.billing.billingTaxId,
@@ -67,34 +74,56 @@ export class ClientService {
     }
 
     try {
-      // 2) Crea Subscription nel PUBLIC
-      const subData: PublicPrisma.SubscriptionCreateInput = {
-        client: { connect: { id: createdClient.id } },
-        amount: new PublicPrisma.Decimal(dto.subscription.amount),
-        currency: dto.subscription.currency ?? 'EUR',
-        billingCycle: dto.subscription.billingCycle,
-        contractTerm: dto.subscription.contractTerm,
-        method: dto.subscription.paymentMethod,
-        status: dto.subscription.status ?? SubscriptionStatus.ACTIVE, //  runtime enum
+      // 2) Assicurati che esista un SubscriptionPlan (usa quello passato dal DTO)
+      const plan = await this.publicPrisma.subscriptionPlan.findUnique({
+        where: { id: dto.subscription.subscriptionPlanId },
+      });
+      if (!plan) throw new BadRequestException('subscriptionPlanId non valido');
 
-        startsAt: dto.subscription.startsAt
-          ? new Date(dto.subscription.startsAt)
-          : undefined,
-        nextBillingAt: dto.subscription.nextBillingAt
-          ? new Date(dto.subscription.nextBillingAt)
-          : undefined,
-        trialEndsAt: dto.subscription.trialEndsAt
-          ? new Date(dto.subscription.trialEndsAt)
-          : undefined,
-        canceledAt: dto.subscription.canceledAt
-          ? new Date(dto.subscription.canceledAt)
-          : undefined,
-      };
+      // Calcola periodo contrattuale (annualità evolutiva)
+      const startsAt = dto.subscription.startsAt
+        ? new Date(dto.subscription.startsAt)
+        : new Date();
+      let endsAt: Date | undefined;
+      if (dto.subscription.endsAt) {
+        endsAt = new Date(dto.subscription.endsAt);
+      } else {
+        const base = new Date(startsAt);
+        const term = dto.subscription.contractTerm ?? ContractTerm.ONE_YEAR;
+        const years = term === ContractTerm.THREE_YEARS ? 3 : 1;
+        base.setFullYear(base.getFullYear() + years);
+        endsAt = base;
+      }
 
-      const sub = await this.publicPrisma.subscription.create({ data: subData });
+      // Default lato BE per amount/currency/installmentPlan in base al piano
+      const amountInput =
+        dto.subscription.amount != null
+          ? dto.subscription.amount
+          : ((plan.price as any) ?? 0);
+      const currency = dto.subscription.currency ?? plan.currency ?? 'EUR';
+      const contractTerm =
+        dto.subscription.contractTerm ?? ContractTerm.ONE_YEAR;
+      const installmentPlan =
+        dto.subscription.installmentPlan ?? (InstallmentPlan.ONE_SHOT as any);
+
+      // 3) Crea Subscription nel PUBLIC (schema aggiornato)
+      const sub = await this.publicPrisma.subscription.create({
+        data: {
+          client: { connect: { id: createdClient.id } },
+          plan: { connect: { id: plan.id } },
+          amount: new PublicPrisma.Decimal(amountInput),
+          currency,
+          contractTerm,
+          installmentPlan,
+          // Stato iniziale: PENDING_PAYMENT fino al primo pagamento riuscito
+          status: SubscriptionStatus.PENDING_PAYMENT,
+          startsAt,
+          endsAt,
+        },
+      });
       createdSub = { id: sub.id };
 
-      // 3) Replica nel TENANT (shadow minimal)
+      // 4) Replica nel TENANT (shadow minimal)
       await this.tenantPrisma.client.upsert({
         where: { id: createdClient.id },
         update: {
@@ -102,6 +131,15 @@ export class ClientService {
           contactEmail: clientData.contactEmail,
           employeeRange: clientData.employeeRange,
           status: clientData.status as any, // tipi allineati (enum identico nel tenant)
+          billingTaxId: dto.client.billing.billingTaxId,
+          billingEmail: dto.client.billing.billingEmail,
+          billingPec: dto.client.billing.billingPec ?? undefined,
+          billingSdiCode: dto.client.billing.billingSdiCode ?? undefined,
+          billingAddressLine1: dto.client.billing.billingAddressLine1,
+          billingZip: dto.client.billing.billingZip,
+          billingCity: dto.client.billing.billingCity,
+          billingProvince: dto.client.billing.billingProvince,
+          billingCountry: dto.client.billing.billingCountry,
         },
         create: {
           id: createdClient.id,
@@ -109,27 +147,113 @@ export class ClientService {
           contactEmail: clientData.contactEmail,
           employeeRange: clientData.employeeRange,
           status: clientData.status as any,
+          billingTaxId: dto.client.billing.billingTaxId,
+          billingEmail: dto.client.billing.billingEmail,
+          billingPec: dto.client.billing.billingPec ?? undefined,
+          billingSdiCode: dto.client.billing.billingSdiCode ?? undefined,
+          billingAddressLine1: dto.client.billing.billingAddressLine1,
+          billingZip: dto.client.billing.billingZip,
+          billingCity: dto.client.billing.billingCity,
+          billingProvince: dto.client.billing.billingProvince,
+          billingCountry: dto.client.billing.billingCountry,
         },
+      });
+
+      // Replica/Upsert anche il piano nel TENANT per coerenza
+      await this.tenantPrisma.subscriptionPlan.upsert({
+        where: { id: plan.id },
+        update: { name: plan.name, description: plan.description ?? undefined, price: plan.price as any, currency: plan.currency, billingCycle: plan.billingCycle as any, active: plan.active },
+        create: { id: plan.id, name: plan.name, description: plan.description ?? undefined, price: plan.price as any, currency: plan.currency, billingCycle: plan.billingCycle as any, active: plan.active },
       });
 
       await this.tenantPrisma.subscription.create({
         data: {
           id: sub.id, // stesso id per correlazione
           clientId: createdClient.id,
-          billingCycle: sub.billingCycle,
+          subscriptionPlanId: plan.id,
+          amount: sub.amount as any,
+          currency: sub.currency,
+          installmentPlan: sub.installmentPlan as any,
           contractTerm: sub.contractTerm,
           status: sub.status as any,
           startsAt: sub.startsAt,
           nextBillingAt: sub.nextBillingAt ?? undefined,
+          endsAt: sub.endsAt ?? undefined,
         },
       });
 
+      // 4) Crea Admin INVITED come Owner + token di invito (token split)
+      const adminEmail = clientData.contactEmail.toLowerCase();
+      const selector = crypto.randomUUID();
+      const tokenPlain = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(tokenPlain).digest('hex');
+      const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 48); // 48h
+
+      const invited = await this.tenantPrisma.internalUser.create({
+        data: {
+          clientId: createdClient.id,
+          email: adminEmail,
+          password: '', // verrà impostata in activate
+          role: 'ADMIN' as any,
+          status: 'INVITED' as any,
+          isOwner: true,
+          canViewAllCases: true,
+        },
+        select: { id: true, email: true },
+      });
+
+      await this.tenantPrisma.userToken.create({
+        data: {
+          userId: invited.id,
+          clientId: createdClient.id,
+          type: 'INVITE' as any,
+          selector,
+          tokenHash,
+          expiresAt,
+        },
+      });
+
+      const frontendBase = process.env.FRONTEND_BASE_URL?.replace(/\/$/, '');
+      const apiBase = process.env.API_BASE_URL?.replace(/\/$/, '') ?? 'http://localhost:3000/v1';
+      const activationUrl = frontendBase
+        ? `${frontendBase}/activate?selector=${encodeURIComponent(selector)}&token=${encodeURIComponent(tokenPlain)}`
+        : `${apiBase}/public/auth/activate?selector=${encodeURIComponent(selector)}&token=${encodeURIComponent(tokenPlain)}`;
+
+      // Invio email di invito (o solo log in base alla config)
+      try {
+        await this.notify.sendOwnerInvite({
+          email: invited.email,
+          activationUrl,
+          expiresAt,
+          tenantName: clientData.companyName,
+        });
+      } catch {
+        // notifiche non devono bloccare il signup
+      }
+
+      // In ambiente locale, logga il link di attivazione
+      // eslint-disable-next-line no-console
+      console.log(`[Signup] Activation link for ${invited.email}: ${activationUrl}`);
+
+      const exposeUrl = process.env.EXPOSE_ACTIVATION_URLS === 'true' || process.env.NODE_ENV !== 'production';
       return {
         clientId: createdClient.id,
         subscriptionId: sub.id,
         status: 'SUCCESS',
+        ownerInvite: {
+          email: invited.email,
+          expiresAt,
+          ...(exposeUrl ? { activationUrl } : {}),
+        },
       };
+
     } catch (e: any) {
+      // Log esteso per capire la causa del 500 in signup
+      try {
+        // eslint-disable-next-line no-console
+        console.error('[signupOrchestrated] error', e);
+      } catch {}
+
       // COMPENSAZIONE PUBLIC in caso fallisca la replica TENANT o la creazione sub
       try {
         if (createdSub?.id) {
@@ -190,6 +314,15 @@ export class ClientService {
           contactEmail: client.contactEmail,
           employeeRange: client.employeeRange,
           status: client.status as any,
+          billingTaxId: (dto as any).billingTaxId,
+          billingEmail: (dto as any).billingEmail,
+          billingPec: (dto as any).billingPec ?? undefined,
+          billingSdiCode: (dto as any).billingSdiCode ?? undefined,
+          billingAddressLine1: (dto as any).billingAddressLine1,
+          billingZip: (dto as any).billingZip,
+          billingCity: (dto as any).billingCity,
+          billingProvince: (dto as any).billingProvince,
+          billingCountry: (dto as any).billingCountry,
         },
       });
 
@@ -270,6 +403,15 @@ export class ClientService {
           contactEmail: dto.contactEmail ?? undefined,
           employeeRange: dto.employeeRange ?? undefined,
           status: (dto.status as any) ?? undefined,
+          billingTaxId: (dto as any).billingTaxId ?? undefined,
+          billingEmail: (dto as any).billingEmail ?? undefined,
+          billingPec: (dto as any).billingPec ?? undefined,
+          billingSdiCode: (dto as any).billingSdiCode ?? undefined,
+          billingAddressLine1: (dto as any).billingAddressLine1 ?? undefined,
+          billingZip: (dto as any).billingZip ?? undefined,
+          billingCity: (dto as any).billingCity ?? undefined,
+          billingProvince: (dto as any).billingProvince ?? undefined,
+          billingCountry: (dto as any).billingCountry ?? undefined,
         },
       });
 

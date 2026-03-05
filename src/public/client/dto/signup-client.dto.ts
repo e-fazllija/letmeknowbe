@@ -5,9 +5,8 @@ import {
 import { Type } from 'class-transformer';
 import {
   EmployeeRange,
-  BillingCycle,
   ContractTerm,
-  PaymentMethod,
+  InstallmentPlan,
   SubscriptionStatus,
   ClientStatus
 } from '../../../generated/public';
@@ -80,10 +79,6 @@ export class SignupClientCoreDto {
 }
 
 export class SignupSubscriptionDto {
-  @ApiProperty({ enum: BillingCycle, enumName: 'BillingCycle' })
-  @IsEnum(BillingCycle)
-  billingCycle!: BillingCycle;
-
   @ApiProperty({ enum: ContractTerm, enumName: 'ContractTerm' })
   @IsEnum(ContractTerm)
   contractTerm!: ContractTerm;
@@ -97,9 +92,13 @@ export class SignupSubscriptionDto {
   @IsString()
   currency?: string;
 
-  @ApiProperty({ enum: PaymentMethod, enumName: 'PaymentMethod' })
-  @IsEnum(PaymentMethod)
-  paymentMethod!: PaymentMethod;
+  @ApiProperty({ description: 'SubscriptionPlan id' })
+  @IsString()
+  subscriptionPlanId!: string;
+
+  @ApiProperty({ enum: InstallmentPlan, enumName: 'InstallmentPlan' })
+  @IsEnum(InstallmentPlan)
+  installmentPlan!: InstallmentPlan;
 
   @ApiPropertyOptional({ enum: SubscriptionStatus, enumName: 'SubscriptionStatus', default: 'ACTIVE' })
   @IsOptional()
@@ -119,12 +118,7 @@ export class SignupSubscriptionDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsISO8601()
-  trialEndsAt?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsISO8601()
-  canceledAt?: string;
+  endsAt?: string;
 }
 
 export class SignupOptionsDto {

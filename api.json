@@ -1,0 +1,2684 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/v1/platform/auth/login": {
+      "post": {
+        "operationId": "PlatformAuthController_login",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlatformLoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Login superuser (email+password+TOTP) → access token (aud: platform)",
+        "tags": [
+          "platform-auth"
+        ]
+      }
+    },
+    "/v1/platform/auth/me": {
+      "get": {
+        "operationId": "PlatformAuthController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Ritorna le claim del superuser (realm platform)",
+        "tags": [
+          "platform-auth"
+        ]
+      }
+    },
+    "/v1/platform/clients": {
+      "get": {
+        "operationId": "PlatformClientsController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Lista Client (PUBLIC) con subscriptions",
+        "tags": [
+          "platform-clients"
+        ]
+      }
+    },
+    "/v1/platform/clients/{id}": {
+      "get": {
+        "operationId": "PlatformClientsController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Dettaglio Client (PUBLIC) con subscriptions",
+        "tags": [
+          "platform-clients"
+        ]
+      }
+    },
+    "/v1/public/auth/activate": {
+      "post": {
+        "operationId": "PublicAuthController_activate",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActivateDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Attiva un invito (Owner/Admin/Agent) tramite selector + token",
+        "tags": [
+          "public-auth"
+        ]
+      }
+    },
+    "/v1/public/departments": {
+      "get": {
+        "operationId": "PublicReportController_listDepartments",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tenant-key": []
+          }
+        ],
+        "summary": "Reparti attivi del tenant (per selettore form)",
+        "tags": [
+          "Public - Reports"
+        ]
+      }
+    },
+    "/v1/public/categories": {
+      "get": {
+        "operationId": "PublicReportController_listCategories",
+        "parameters": [
+          {
+            "name": "departmentId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tenant-key": []
+          }
+        ],
+        "summary": "Categorie attive per reparto (per selettore form)",
+        "tags": [
+          "Public - Reports"
+        ]
+      }
+    },
+    "/v1/public/reports": {
+      "post": {
+        "operationId": "PublicReportController_createReport",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePublicReportDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tenant-key": []
+          }
+        ],
+        "summary": "Crea una nuova segnalazione (form pubblico)",
+        "tags": [
+          "Public - Reports"
+        ]
+      }
+    },
+    "/v1/public/reports/reply": {
+      "post": {
+        "description": "Verifica publicCode + secret. Allegati consentiti solo con presign abilitato. Limiti: max 3 allegati, ≤10MB ciascuno, ≤20MB totali.",
+        "operationId": "PublicReportController_reply",
+        "parameters": [
+          {
+            "name": "includeThread",
+            "required": false,
+            "in": "query",
+            "description": "Se true, include il thread PUBLIC aggiornato nella risposta",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicReplyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tenant-key": []
+          }
+        ],
+        "summary": "Replica del segnalante (PUBLIC)",
+        "tags": [
+          "Public - Reports"
+        ]
+      }
+    },
+    "/v1/public/reports/attachments/presign": {
+      "post": {
+        "operationId": "PublicReportController_presign",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tenant-key": []
+          }
+        ],
+        "summary": "Presign per upload allegati (stub: 501 se disabilitato/non implementato)",
+        "tags": [
+          "Public - Reports"
+        ]
+      }
+    },
+    "/v1/public/reports/attachments/finalize": {
+      "post": {
+        "operationId": "PublicReportController_finalize",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachmentsFinalizeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tenant-key": []
+          }
+        ],
+        "summary": "Finalize upload allegati (S3/MinIO): valida HMAC/ETag/size e registra in quarantena",
+        "tags": [
+          "Public - Reports"
+        ]
+      }
+    },
+    "/v1/public/reports/status": {
+      "get": {
+        "description": "Richiede publicCode + secret; ritorna solo informazioni sicure e il thread PUBLIC.",
+        "operationId": "PublicReportController_publicStatus",
+        "parameters": [
+          {
+            "name": "publicCode",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "secret",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tenant-key": []
+          }
+        ],
+        "summary": "Stato pubblico della segnalazione",
+        "tags": [
+          "Public - Reports"
+        ]
+      }
+    },
+    "/v1/public/voice/attachments/presign": {
+      "post": {
+        "operationId": "PublicVoiceController_presign",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tenant-key": []
+          }
+        ],
+        "summary": "Presign per upload audio (stub: 501 se disabilitato)",
+        "tags": [
+          "Public - Voice"
+        ]
+      }
+    },
+    "/v1/public/voice/reports": {
+      "post": {
+        "operationId": "PublicVoiceController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVoiceReportDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "tenant-key": []
+          }
+        ],
+        "summary": "Crea una segnalazione vocale (audio allegato, trascrizione async futura)",
+        "tags": [
+          "Public - Voice"
+        ]
+      }
+    },
+    "/v1/public/clients/signup": {
+      "post": {
+        "operationId": "ClientController_signup",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupClientDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Crea azienda + subscription (onboarding aziendale)",
+        "tags": [
+          "public-clients"
+        ]
+      }
+    },
+    "/v1/public/clients": {
+      "post": {
+        "operationId": "ClientController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateClientDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Crea un nuovo client (rotte granulari)",
+        "tags": [
+          "public-clients"
+        ]
+      },
+      "get": {
+        "operationId": "ClientController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Lista aziende",
+        "tags": [
+          "public-clients"
+        ]
+      }
+    },
+    "/v1/public/clients/{id}": {
+      "get": {
+        "operationId": "ClientController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Dettaglio azienda",
+        "tags": [
+          "public-clients"
+        ]
+      },
+      "patch": {
+        "operationId": "ClientController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateClientDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Modifica azienda",
+        "tags": [
+          "public-clients"
+        ]
+      },
+      "delete": {
+        "operationId": "ClientController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Elimina azienda",
+        "tags": [
+          "public-clients"
+        ]
+      }
+    },
+    "/v1/public/clients/{id}/subscriptions": {
+      "get": {
+        "operationId": "ClientController_findSubscriptions",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Lista sottoscrizioni di un’azienda",
+        "tags": [
+          "public-clients"
+        ]
+      }
+    },
+    "/v1/public/subscriptions": {
+      "post": {
+        "operationId": "SubscriptionController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSubscriptionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Crea la sottoscrizione dell’azienda tramite clientId",
+        "tags": [
+          "public-subscriptions"
+        ]
+      },
+      "get": {
+        "operationId": "SubscriptionController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Ritorna tutte le sottoscrizioni presenti nel DB",
+        "tags": [
+          "public-subscriptions"
+        ]
+      }
+    },
+    "/v1/public/subscriptions/{id}": {
+      "get": {
+        "operationId": "SubscriptionController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Subscription id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Ritorna la sottoscrizione tramite ID",
+        "tags": [
+          "public-subscriptions"
+        ]
+      },
+      "patch": {
+        "operationId": "SubscriptionController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Subscription id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSubscriptionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Modifica la sottoscrizione tramite ID",
+        "tags": [
+          "public-subscriptions"
+        ]
+      },
+      "delete": {
+        "operationId": "SubscriptionController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "description": "Subscription id",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Elimina la sottoscrizione tramite ID",
+        "tags": [
+          "public-subscriptions"
+        ]
+      }
+    },
+    "/v1/tenant/auth/signup": {
+      "post": {
+        "operationId": "TenantAuthController_signup",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Crea ADMIN sul db nella tabella internaluser",
+        "tags": [
+          "tenant-auth"
+        ]
+      }
+    },
+    "/v1/tenant/auth/login": {
+      "post": {
+        "operationId": "TenantAuthController_login",
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "required": true,
+            "in": "header",
+            "description": "ID del client (tenant) per il login multi-tenant",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Effettua il login di degli AGENT o ADMIN",
+        "tags": [
+          "tenant-auth"
+        ]
+      }
+    },
+    "/v1/tenant/auth/mfa/setup": {
+      "post": {
+        "operationId": "TenantAuthController_mfaSetup",
+        "parameters": [
+          {
+            "name": "x-mfa-token",
+            "required": true,
+            "in": "header",
+            "description": "Setup token (oppure Bearer \u003Csetup_token\u003E)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Genera un segreto TOTP per abilitare la MFA",
+        "tags": [
+          "tenant-auth"
+        ]
+      }
+    },
+    "/v1/tenant/auth/mfa/verify": {
+      "post": {
+        "operationId": "TenantAuthController_mfaVerify",
+        "parameters": [
+          {
+            "name": "x-mfa-token",
+            "required": true,
+            "in": "header",
+            "description": "Setup token (oppure Bearer \u003Csetup_token\u003E)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaCodeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Verifica il codice TOTP e abilita la MFA",
+        "tags": [
+          "tenant-auth"
+        ]
+      }
+    },
+    "/v1/tenant/auth/mfa/complete": {
+      "post": {
+        "operationId": "TenantAuthController_mfaComplete",
+        "parameters": [
+          {
+            "name": "x-mfa-token",
+            "required": true,
+            "in": "header",
+            "description": "MFA token (oppure Bearer \u003Cmfa_token\u003E)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaCodeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Completa il login MFA con un codice TOTP valido",
+        "tags": [
+          "tenant-auth"
+        ]
+      }
+    },
+    "/v1/tenant/auth/mfa/recovery": {
+      "post": {
+        "operationId": "TenantAuthController_mfaRecovery",
+        "parameters": [
+          {
+            "name": "x-mfa-token",
+            "required": true,
+            "in": "header",
+            "description": "MFA token (oppure Bearer \u003Cmfa_token\u003E)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "authorization",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfaRecoveryDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Completa il login MFA usando un codice di recupero",
+        "tags": [
+          "tenant-auth"
+        ]
+      }
+    },
+    "/v1/tenant/auth/refresh": {
+      "post": {
+        "operationId": "TenantAuthController_refresh",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Ruota il refresh token ed emette un nuovo access token",
+        "tags": [
+          "tenant-auth"
+        ]
+      }
+    },
+    "/v1/tenant/auth/logout": {
+      "post": {
+        "operationId": "TenantAuthController_logout",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "summary": "Revoca la sessione di refresh corrente",
+        "tags": [
+          "tenant-auth"
+        ]
+      }
+    },
+    "/v1/tenant/auth/me": {
+      "get": {
+        "operationId": "TenantAuthController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Ritorna il profilo utente corrente (JWT access)",
+        "tags": [
+          "tenant-auth"
+        ]
+      }
+    },
+    "/v1/tenant/users": {
+      "post": {
+        "operationId": "UserController_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "summary": "Crea AGENT sul db nella tabella internaluser",
+        "tags": [
+          "tenant-users"
+        ]
+      },
+      "get": {
+        "operationId": "UserController_findAll",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Ritorna tutti gli AGENT e ADMIN dal db nella tabella internaluser",
+        "tags": [
+          "tenant-users"
+        ]
+      }
+    },
+    "/v1/tenant/users/{id}": {
+      "get": {
+        "operationId": "UserController_findOne",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Ritorna gli AGENT o ADMIN dal db nella tabella internaluser tramite id utente",
+        "tags": [
+          "tenant-users"
+        ]
+      },
+      "patch": {
+        "operationId": "UserController_update",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Modifica gli AGENT o ADMIN nella tabella internaluser tramite id utente",
+        "tags": [
+          "tenant-users"
+        ]
+      },
+      "delete": {
+        "operationId": "UserController_remove",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Elimina gli AGENT o ADMIN nella tabella internaluser tramite id utente",
+        "tags": [
+          "tenant-users"
+        ]
+      }
+    },
+    "/v1/tenant/reports": {
+      "post": {
+        "operationId": "ReportController_createReport",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "description": "Supporto legacy: tipoSegnalazione/ufficio/segnalazione verranno mappati internamente (deprecato).",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTenantReportDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Crea una segnalazione (backoffice) con payload unificato",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      },
+      "get": {
+        "operationId": "ReportController_listReports",
+        "parameters": [
+          {
+            "name": "clientId",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "required": false,
+            "in": "query",
+            "description": "Pagina (base 1)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "required": false,
+            "in": "query",
+            "description": "Dimensione pagina (max 100)",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          },
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Filtra per stato (CSV: OPEN,IN_PROGRESS,...)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "departmentId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "categoryId",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "q",
+            "required": false,
+            "in": "query",
+            "description": "Ricerca testuale su title/summary",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Elenco segnalazioni per cliente (admin/agent)",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/tenant/reports/token/{token}": {
+      "get": {
+        "operationId": "ReportController_getByToken",
+        "parameters": [
+          {
+            "name": "token",
+            "required": true,
+            "in": "path",
+            "description": "Token fornito al segnalante",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Recupera una segnalazione tramite token (utente pubblico)",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/tenant/reports/{reportId}": {
+      "get": {
+        "operationId": "ReportController_getDetail",
+        "parameters": [
+          {
+            "name": "reportId",
+            "required": true,
+            "in": "path",
+            "description": "ID della segnalazione",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Dettaglio segnalazione (auto-ack alla prima lettura)",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      },
+      "delete": {
+        "description": "Rimuove la segnalazione e tutti i dati collegati (messaggi, utenti pubblici).",
+        "operationId": "ReportController_deleteReport",
+        "parameters": [
+          {
+            "name": "reportId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Elimina una segnalazione",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/tenant/reports/message": {
+      "post": {
+        "operationId": "ReportController_addMessage",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTenantMessageDto"
+              },
+              "examples": {
+                "notaInterna": {
+                  "summary": "Nota interna (non visibile al segnalante)",
+                  "value": {
+                    "reportId": "rep_cuid_123",
+                    "body": "Promemoria per il team",
+                    "visibility": "INTERNAL"
+                  }
+                },
+                "messaggioPubblico": {
+                  "summary": "Messaggio al segnalante (visibile pubblicamente)",
+                  "value": {
+                    "reportId": "rep_cuid_123",
+                    "body": "Per favore indica data e luogo dell'evento",
+                    "visibility": "PUBLIC"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Aggiunge una nota interna (INTERNAL) o un messaggio pubblico (PUBLIC) al report",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/tenant/reports/{reportId}/messages": {
+      "get": {
+        "operationId": "ReportController_listMessages",
+        "parameters": [
+          {
+            "name": "reportId",
+            "required": true,
+            "in": "path",
+            "description": "ID della segnalazione",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "visibility",
+            "required": false,
+            "in": "query",
+            "description": "ALL | PUBLIC | INTERNAL | SYSTEM | CSV (es. PUBLIC,INTERNAL)",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Elenco messaggi di una segnalazione (tenant)",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/tenant/reports/{reportId}/status": {
+      "patch": {
+        "description": "Aggiorna esclusivamente lo stato (OPEN, IN_PROGRESS, SUSPENDED, NEED_INFO, CLOSED). I timestamp vengono aggiornati per OPEN/IN_PROGRESS/CLOSED.",
+        "operationId": "ReportController_updateStatus",
+        "parameters": [
+          {
+            "name": "reportId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReportStatusDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Aggiorna lo stato della segnalazione",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/tenant/reports/{reportId}/message/{messageId}/note": {
+      "patch": {
+        "description": "Consente update solo per messaggi INTERNAL. PUBLIC/SYSTEM → 403.",
+        "operationId": "ReportController_updateMessageNote",
+        "parameters": [
+          {
+            "name": "reportId",
+            "required": true,
+            "in": "path",
+            "description": "ID del report",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "required": true,
+            "in": "path",
+            "description": "ID del messaggio",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": {
+                    "type": "string",
+                    "example": "Nota riservata o appunto interno"
+                  }
+                },
+                "required": [
+                  "note"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Aggiorna la nota di un messaggio (solo INTERNAL)",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/tenant/reports/{reportId}/message/{messageId}/body": {
+      "patch": {
+        "description": "Consente update solo per messaggi INTERNAL. PUBLIC/SYSTEM → 403.",
+        "operationId": "ReportController_updateMessageBody",
+        "parameters": [
+          {
+            "name": "reportId",
+            "required": true,
+            "in": "path",
+            "description": "ID del report",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "required": true,
+            "in": "path",
+            "description": "ID del messaggio",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "body": {
+                    "type": "string",
+                    "example": "Testo aggiornato del messaggio"
+                  }
+                },
+                "required": [
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Aggiorna il contenuto (body) di un messaggio (solo INTERNAL)",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/tenant/reports/{reportId}/request-info": {
+      "post": {
+        "description": "Imposta lo stato a NEED_INFO (con audit SYSTEM) e invia un messaggio PUBLIC al segnalante.",
+        "operationId": "ReportController_requestInfo",
+        "parameters": [
+          {
+            "name": "reportId",
+            "required": true,
+            "in": "path",
+            "description": "ID della segnalazione",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestInfoDto"
+              },
+              "examples": {
+                "richiesta": {
+                  "summary": "Esempio richiesta",
+                  "value": {
+                    "message": "Puoi indicare data e luogo dell'evento?",
+                    "note": "Mancano dettagli minimi"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Richiedi chiarimenti al segnalante",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/tenant/reports/{reportId}/voice/transcript": {
+      "post": {
+        "description": "Crea un messaggio INTERNAL con il testo della trascrizione",
+        "operationId": "ReportController_addTranscript",
+        "parameters": [
+          {
+            "name": "reportId",
+            "required": true,
+            "in": "path",
+            "description": "ID della segnalazione",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VoiceTranscriptDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "access-token": []
+          }
+        ],
+        "summary": "Aggiunge una trascrizione audio (INTERNAL)",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/tenant/reports/{reportId}/logs": {
+      "get": {
+        "operationId": "ReportController_getLogs",
+        "parameters": [
+          {
+            "name": "reportId",
+            "required": true,
+            "in": "path",
+            "description": "ID della segnalazione",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Access log del report (view/export)",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/tenant/reports/{reportId}/export": {
+      "get": {
+        "operationId": "ReportController_export",
+        "parameters": [
+          {
+            "name": "reportId",
+            "required": true,
+            "in": "path",
+            "description": "ID della segnalazione",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "summary": "Esporta il report in PDF (engine MOCK/PDFKIT)",
+        "tags": [
+          "Tenant - Segnalazioni"
+        ]
+      }
+    },
+    "/v1/health": {
+      "get": {
+        "operationId": "HealthController_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "Health"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "LetMeKnow API",
+    "description": "API multi-tenant per la gestione del whistleblowing.\u003Cbr\u003E\u003Cbr\u003E\n      \u003Cb\u003EAutenticazione:\u003C/b\u003E\u003Cbr\u003E\n      - Inserisci un \u003Cb\u003Etoken JWT\u003C/b\u003E (Authorization: Bearer &lt;token&gt;) per accedere alle rotte protette.\u003Cbr\u003E\n      - In alternativa, puoi usare un \u003Cb\u003EID Tenant\u003C/b\u003E opzionale tramite header \u003Ccode\u003Ex-tenant-id\u003C/code\u003E.\u003Cbr\u003E\u003Cbr\u003E\n      Puoi cliccare su \u003Cb\u003EAuthorize\u003C/b\u003E per aggiungere queste informazioni una sola volta.",
+    "version": "1.0",
+    "contact": {
+
+    }
+  },
+  "tags": [],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "access-token": {
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "type": "http",
+        "description": "Inserisci qui il tuo token JWT per accedere alle API protette.\u003Cbr\u003E\u003Cbr\u003EEsempio: \u003Ccode\u003EBearer eyJhbGciOi...\u003C/code\u003E"
+      },
+      "tenant-key": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-tenant-id",
+        "description": "Inserisci qui l`ID del tenant se necessario per identificare il contesto multi-tenant.\u003Cbr\u003EEsempio: \u003Ccode\u003Eintent-001\u003C/code\u003E"
+      }
+    },
+    "schemas": {
+      "PlatformLoginDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "description": "Codice TOTP a 6 cifre"
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "code"
+        ]
+      },
+      "ActivateDto": {
+        "type": "object",
+        "properties": {
+          "selector": {
+            "type": "string",
+            "description": "Selector UUID inviato via e-mail"
+          },
+          "token": {
+            "type": "string",
+            "description": "Token segreto (non persiste in DB)"
+          },
+          "password": {
+            "type": "string",
+            "description": "Nuova password"
+          }
+        },
+        "required": [
+          "selector",
+          "token",
+          "password"
+        ]
+      },
+      "PublicAttachmentDto": {
+        "type": "object",
+        "properties": {
+          "fileName": {
+            "type": "string",
+            "example": "prova.pdf"
+          },
+          "mimeType": {
+            "type": "string",
+            "example": "application/pdf"
+          },
+          "sizeBytes": {
+            "type": "number",
+            "example": 524288
+          },
+          "storageKey": {
+            "type": "string",
+            "example": "tenant-123/tmp/550e8400-e29b-41d4-a716-446655440000"
+          },
+          "proof": {
+            "type": "string",
+            "example": "hmac-sha256(storageKey)",
+            "description": "Prova HMAC del presign per validazione server-side"
+          }
+        },
+        "required": [
+          "fileName",
+          "mimeType",
+          "sizeBytes",
+          "storageKey"
+        ]
+      },
+      "CreatePublicReportDto": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "Data dell'evento",
+            "example": "2025-10-14T09:30:00.000Z"
+          },
+          "source": {
+            "type": "string",
+            "description": "Fonte della segnalazione",
+            "enum": [
+              "WEB",
+              "PHONE",
+              "EMAIL",
+              "OTHER",
+              "ALTRO"
+            ],
+            "example": "WEB"
+          },
+          "privacy": {
+            "type": "string",
+            "description": "Privacy del segnalante",
+            "enum": [
+              "ANONIMO",
+              "CONFIDENZIALE"
+            ],
+            "example": "ANONIMO",
+            "default": "ANONIMO"
+          },
+          "subject": {
+            "type": "string",
+            "description": "Oggetto della segnalazione",
+            "example": "Irregolarità in reparto contabilità"
+          },
+          "departmentId": {
+            "type": "string",
+            "description": "Reparto selezionato",
+            "example": "dep_cuid_123"
+          },
+          "categoryId": {
+            "type": "string",
+            "description": "Categoria selezionata",
+            "example": "cat_cuid_456"
+          },
+          "description": {
+            "type": "string",
+            "description": "Descrizione dettagliata",
+            "example": "Dettagli della segnalazione...",
+            "minLength": 10,
+            "maxLength": 10000
+          },
+          "attachments": {
+            "description": "Allegati caricati via presign",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicAttachmentDto"
+            }
+          }
+        },
+        "required": [
+          "date",
+          "source",
+          "privacy",
+          "subject",
+          "departmentId",
+          "categoryId",
+          "description"
+        ]
+      },
+      "PublicReplyDto": {
+        "type": "object",
+        "properties": {
+          "publicCode": {
+            "type": "string",
+            "description": "Codice pubblico del report",
+            "example": "R-AB12-CD34"
+          },
+          "secret": {
+            "type": "string",
+            "description": "Segreto mostrato una sola volta in fase di creazione",
+            "example": "\u003CSECRET\u003E"
+          },
+          "body": {
+            "type": "string",
+            "description": "Contenuto della replica",
+            "example": "Ulteriori dettagli richiesti...",
+            "minLength": 1,
+            "maxLength": 5000
+          },
+          "attachments": {
+            "description": "Allegati (se presign attivo)",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicAttachmentDto"
+            }
+          }
+        },
+        "required": [
+          "publicCode",
+          "secret",
+          "body"
+        ]
+      },
+      "FinalizeItemDto": {
+        "type": "object",
+        "properties": {
+          "storageKey": {
+            "type": "string",
+            "example": "tenant_123/tmp/uuid.pdf"
+          },
+          "etag": {
+            "type": "string",
+            "example": "\"d41d8cd98f00b204e9800998ecf8427e\""
+          },
+          "sizeBytes": {
+            "type": "number",
+            "example": 1024
+          },
+          "fileName": {
+            "type": "string",
+            "example": "allegato.pdf"
+          },
+          "mimeType": {
+            "type": "string",
+            "example": "application/pdf"
+          },
+          "hmac": {
+            "type": "string",
+            "description": "HMAC di conferma",
+            "example": "abcdef0123"
+          }
+        },
+        "required": [
+          "storageKey",
+          "etag",
+          "sizeBytes",
+          "fileName",
+          "mimeType",
+          "hmac"
+        ]
+      },
+      "AttachmentsFinalizeDto": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FinalizeItemDto"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "CreateVoiceReportDto": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "Data dell'evento",
+            "example": "2025-10-14T09:30:00.000Z"
+          },
+          "privacy": {
+            "type": "string",
+            "description": "Privacy del segnalante",
+            "enum": [
+              "ANONIMO",
+              "CONFIDENZIALE"
+            ],
+            "example": "ANONIMO",
+            "default": "ANONIMO"
+          },
+          "subject": {
+            "type": "string",
+            "description": "Oggetto della segnalazione",
+            "example": "Segnalazione vocale"
+          },
+          "departmentId": {
+            "type": "string",
+            "description": "Reparto selezionato",
+            "example": "dep_cuid_123"
+          },
+          "categoryId": {
+            "type": "string",
+            "description": "Categoria selezionata",
+            "example": "cat_cuid_456"
+          },
+          "description": {
+            "type": "string",
+            "description": "Descrizione opzionale (la trascrizione arriverà in seguito)"
+          },
+          "attachments": {
+            "description": "Almeno un allegato audio via presign",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicAttachmentDto"
+            }
+          }
+        },
+        "required": [
+          "date",
+          "privacy",
+          "subject",
+          "departmentId",
+          "categoryId",
+          "attachments"
+        ]
+      },
+      "EmployeeRange": {
+        "type": "string",
+        "enum": [
+          "DA_0_A_50",
+          "DA_51_A_100",
+          "DA_101_A_150",
+          "DA_151_A_200",
+          "DA_201_A_250",
+          "OLTRE_250"
+        ]
+      },
+      "ClientStatus": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED",
+          "ARCHIVED"
+        ]
+      },
+      "SignupClientBillingDto": {
+        "type": "object",
+        "properties": {
+          "billingTaxId": {
+            "type": "string",
+            "description": "P.IVA/CF (univoco)"
+          },
+          "billingEmail": {
+            "type": "string"
+          },
+          "billingPec": {
+            "type": "string"
+          },
+          "billingSdiCode": {
+            "type": "string",
+            "description": "SDI 7 alfanumerici o 0000000"
+          },
+          "billingAddressLine1": {
+            "type": "string"
+          },
+          "billingZip": {
+            "type": "string",
+            "example": "00100"
+          },
+          "billingCity": {
+            "type": "string"
+          },
+          "billingProvince": {
+            "type": "string",
+            "example": "RM"
+          },
+          "billingCountry": {
+            "type": "string",
+            "example": "Italia"
+          }
+        },
+        "required": [
+          "billingTaxId",
+          "billingEmail",
+          "billingAddressLine1",
+          "billingZip",
+          "billingCity",
+          "billingProvince",
+          "billingCountry"
+        ]
+      },
+      "SignupClientCoreDto": {
+        "type": "object",
+        "properties": {
+          "companyName": {
+            "type": "string"
+          },
+          "contactEmail": {
+            "type": "string"
+          },
+          "employeeRange": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmployeeRange"
+              }
+            ]
+          },
+          "status": {
+            "default": "ACTIVE",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ClientStatus"
+              }
+            ]
+          },
+          "billing": {
+            "$ref": "#/components/schemas/SignupClientBillingDto"
+          }
+        },
+        "required": [
+          "companyName",
+          "contactEmail",
+          "employeeRange",
+          "billing"
+        ]
+      },
+      "BillingCycle": {
+        "type": "string",
+        "enum": [
+          "MENSILE",
+          "ANNUALE"
+        ]
+      },
+      "ContractTerm": {
+        "type": "string",
+        "enum": [
+          "ONE_YEAR",
+          "THREE_YEARS"
+        ]
+      },
+      "PaymentMethod": {
+        "type": "string",
+        "enum": [
+          "CARTA",
+          "BONIFICO"
+        ]
+      },
+      "SubscriptionStatus": {
+        "type": "string",
+        "enum": [
+          "ACTIVE",
+          "TRIALING",
+          "PAST_DUE",
+          "CANCELED",
+          "EXPIRED"
+        ]
+      },
+      "SignupSubscriptionDto": {
+        "type": "object",
+        "properties": {
+          "billingCycle": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BillingCycle"
+              }
+            ]
+          },
+          "contractTerm": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ContractTerm"
+              }
+            ]
+          },
+          "amount": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string",
+            "example": "EUR"
+          },
+          "paymentMethod": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethod"
+              }
+            ]
+          },
+          "status": {
+            "default": "ACTIVE",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionStatus"
+              }
+            ]
+          },
+          "startsAt": {
+            "type": "string"
+          },
+          "nextBillingAt": {
+            "type": "string"
+          },
+          "trialEndsAt": {
+            "type": "string"
+          },
+          "canceledAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "billingCycle",
+          "contractTerm",
+          "amount",
+          "currency",
+          "paymentMethod"
+        ]
+      },
+      "SignupOptionsDto": {
+        "type": "object",
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "description": "Chiave idempotenza; meglio passarla in header"
+          }
+        }
+      },
+      "SignupClientDto": {
+        "type": "object",
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/SignupClientCoreDto"
+          },
+          "subscription": {
+            "$ref": "#/components/schemas/SignupSubscriptionDto"
+          },
+          "options": {
+            "$ref": "#/components/schemas/SignupOptionsDto"
+          }
+        },
+        "required": [
+          "client",
+          "subscription"
+        ]
+      },
+      "CreateClientDto": {
+        "type": "object",
+        "properties": {
+          "companyName": {
+            "type": "string"
+          },
+          "contactEmail": {
+            "type": "string"
+          },
+          "employeeRange": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmployeeRange"
+              }
+            ]
+          },
+          "billingTaxId": {
+            "type": "string",
+            "description": "P.IVA o CF (univoco)"
+          },
+          "billingEmail": {
+            "type": "string"
+          },
+          "billingPec": {
+            "type": "string"
+          },
+          "billingSdiCode": {
+            "type": "string",
+            "description": "Codice Destinatario SDI (7 alfanumerici) o 0000000 con sola PEC"
+          },
+          "billingAddressLine1": {
+            "type": "string"
+          },
+          "billingZip": {
+            "type": "string",
+            "example": "00100"
+          },
+          "billingCity": {
+            "type": "string"
+          },
+          "billingProvince": {
+            "type": "string",
+            "example": "RM"
+          },
+          "billingCountry": {
+            "type": "string",
+            "example": "Italia"
+          }
+        },
+        "required": [
+          "companyName",
+          "contactEmail",
+          "employeeRange",
+          "billingTaxId",
+          "billingEmail",
+          "billingAddressLine1",
+          "billingZip",
+          "billingCity",
+          "billingProvince",
+          "billingCountry"
+        ]
+      },
+      "UpdateClientDto": {
+        "type": "object",
+        "properties": {
+          "companyName": {
+            "type": "string"
+          },
+          "contactEmail": {
+            "type": "string"
+          },
+          "employeeRange": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmployeeRange"
+              }
+            ]
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ClientStatus"
+              }
+            ]
+          },
+          "billingTaxId": {
+            "type": "string",
+            "description": "P.IVA/CF"
+          },
+          "billingEmail": {
+            "type": "string"
+          },
+          "billingPec": {
+            "type": "string"
+          },
+          "billingSdiCode": {
+            "type": "string",
+            "description": "SDI 7 alfanumerici"
+          },
+          "billingAddressLine1": {
+            "type": "string"
+          },
+          "billingZip": {
+            "type": "string",
+            "example": "00100"
+          },
+          "billingCity": {
+            "type": "string"
+          },
+          "billingProvince": {
+            "type": "string",
+            "example": "RM"
+          },
+          "billingCountry": {
+            "type": "string",
+            "example": "Italia"
+          }
+        }
+      },
+      "CreateSubscriptionDto": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string",
+            "example": "EUR"
+          },
+          "billingCycle": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BillingCycle"
+              }
+            ]
+          },
+          "contractTerm": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ContractTerm"
+              }
+            ]
+          },
+          "paymentMethod": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethod"
+              }
+            ]
+          },
+          "status": {
+            "default": "ACTIVE",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionStatus"
+              }
+            ]
+          },
+          "startsAt": {
+            "type": "string",
+            "description": "Data inizio"
+          },
+          "nextBillingAt": {
+            "type": "string"
+          },
+          "trialEndsAt": {
+            "type": "string"
+          },
+          "canceledAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "clientId",
+          "amount",
+          "currency",
+          "billingCycle",
+          "contractTerm",
+          "paymentMethod"
+        ]
+      },
+      "UpdateSubscriptionDto": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "billingCycle": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BillingCycle"
+              }
+            ]
+          },
+          "contractTerm": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ContractTerm"
+              }
+            ]
+          },
+          "paymentMethod": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaymentMethod"
+              }
+            ]
+          },
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SubscriptionStatus"
+              }
+            ]
+          },
+          "startsAt": {
+            "type": "string"
+          },
+          "nextBillingAt": {
+            "type": "string"
+          },
+          "trialEndsAt": {
+            "type": "string"
+          },
+          "canceledAt": {
+            "type": "string"
+          }
+        }
+      },
+      "SignupDto": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "example": "ADMIN"
+          }
+        },
+        "required": [
+          "clientId",
+          "email",
+          "password",
+          "role"
+        ]
+      },
+      "LoginDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "MfaCodeDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Codice TOTP a 6 cifre generato dall'app di autenticazione"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "MfaRecoveryDto": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Codice di recupero fornito durante il setup (20-24 caratteri)"
+          }
+        },
+        "required": [
+          "code"
+        ]
+      },
+      "CreateUserDto": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "ADMIN",
+              "AGENT",
+              "AUDITOR"
+            ]
+          }
+        },
+        "required": [
+          "clientId",
+          "email",
+          "password",
+          "role"
+        ]
+      },
+      "UpdateUserDto": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateTenantReportDto": {
+        "type": "object",
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "Data dell'evento",
+            "example": "2025-10-14T09:30:00.000Z"
+          },
+          "source": {
+            "type": "string",
+            "description": "Fonte della segnalazione",
+            "enum": [
+              "WEB",
+              "PHONE",
+              "EMAIL",
+              "OTHER",
+              "ALTRO"
+            ],
+            "example": "WEB"
+          },
+          "privacy": {
+            "type": "string",
+            "description": "Privacy del segnalante",
+            "enum": [
+              "ANONIMO",
+              "CONFIDENZIALE"
+            ],
+            "example": "ANONIMO",
+            "default": "ANONIMO"
+          },
+          "subject": {
+            "type": "string",
+            "description": "Oggetto della segnalazione",
+            "example": "Irregolarità in reparto contabilità"
+          },
+          "departmentId": {
+            "type": "string",
+            "description": "Reparto selezionato",
+            "example": "dep_cuid_123"
+          },
+          "categoryId": {
+            "type": "string",
+            "description": "Categoria selezionata",
+            "example": "cat_cuid_456"
+          },
+          "description": {
+            "type": "string",
+            "description": "Descrizione dettagliata",
+            "example": "Dettagli della segnalazione...",
+            "minLength": 10,
+            "maxLength": 10000
+          },
+          "attachments": {
+            "description": "Allegati caricati via presign",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicAttachmentDto"
+            }
+          }
+        },
+        "required": [
+          "date",
+          "source",
+          "privacy",
+          "subject",
+          "departmentId",
+          "categoryId",
+          "description"
+        ]
+      },
+      "CreateTenantMessageDto": {
+        "type": "object",
+        "properties": {
+          "reportId": {
+            "type": "string",
+            "description": "ID del report",
+            "example": "rep_cuid_123"
+          },
+          "body": {
+            "type": "string",
+            "description": "Contenuto del messaggio/nota",
+            "example": "Promemoria interno oppure richiesta chiarimenti"
+          },
+          "visibility": {
+            "type": "string",
+            "description": "Visibilità del messaggio",
+            "enum": [
+              "PUBLIC",
+              "INTERNAL"
+            ],
+            "default": "INTERNAL"
+          }
+        },
+        "required": [
+          "reportId",
+          "body"
+        ]
+      },
+      "CreateReportStatusDto": {
+        "type": "object",
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "reportId": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "IN_PROGRESS",
+              "SUSPENDED",
+              "NEED_INFO",
+              "CLOSED"
+            ],
+            "description": "Nuovo stato del report (OPEN, IN_PROGRESS, SUSPENDED, NEED_INFO, CLOSED)"
+          }
+        },
+        "required": [
+          "clientId",
+          "reportId",
+          "status"
+        ]
+      },
+      "RequestInfoDto": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Messaggio pubblico al segnalante (richiesta chiarimenti)",
+            "example": "Puoi indicare data e luogo dell'evento?"
+          },
+          "note": {
+            "type": "string",
+            "description": "Nota interna per audit (facoltativa)",
+            "example": "Mancano dettagli minimi per procedere"
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "VoiceTranscriptDto": {
+        "type": "object",
+        "properties": {
+          "transcript": {
+            "type": "string",
+            "description": "Testo della trascrizione",
+            "example": "Trascrizione del contenuto audio..."
+          }
+        },
+        "required": [
+          "transcript"
+        ]
+      }
+    }
+  }
+}

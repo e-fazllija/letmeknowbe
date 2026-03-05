@@ -1,0 +1,439 @@
+{
+    "auth":  {
+                 "bearer_on_tenant_routes":  true,
+                 "refresh_endpoint":  true,
+                 "x_tenant_id_only_on_login":  true,
+                 "cors_credentials_true":  true,
+                 "samesite":  "lax",
+                 "refresh_exclusions_ok":  true
+             },
+    "routes":  [
+                   {
+                       "resource":  "users",
+                       "method":  "GET",
+                       "path":  "/v1/tenant/users",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "users",
+                       "method":  "POST",
+                       "path":  "/v1/tenant/users/invite",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "users",
+                       "method":  "DELETE",
+                       "path":  "/v1/tenant/users/{id}",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "dto_issues":  [
+                                          "soft delete implemented"
+                                      ]
+                   },
+                   {
+                       "resource":  "departments",
+                       "method":  "GET",
+                       "path":  "/v1/tenant/departments",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN",
+                                     "AGENT"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "departments",
+                       "method":  "POST",
+                       "path":  "/v1/tenant/departments",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "departments",
+                       "method":  "PATCH",
+                       "path":  "/v1/tenant/departments/{id}",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "departments",
+                       "method":  "DELETE",
+                       "path":  "/v1/tenant/departments/{id}",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "categories",
+                       "method":  "GET",
+                       "path":  "/v1/tenant/categories",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN",
+                                     "AGENT"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "categories",
+                       "method":  "POST",
+                       "path":  "/v1/tenant/categories",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "categories",
+                       "method":  "PATCH",
+                       "path":  "/v1/tenant/categories/{id}",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "categories",
+                       "method":  "DELETE",
+                       "path":  "/v1/tenant/categories/{id}",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "stats",
+                       "method":  "GET",
+                       "path":  "/v1/tenant/stats",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN",
+                                     "AGENT"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "reports",
+                       "method":  "GET",
+                       "path":  "/v1/tenant/reports",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN",
+                                     "AGENT",
+                                     "AUDITOR"
+                                 ],
+                       "dto_issues":  [
+                                          "clientId required in query"
+                                      ]
+                   },
+                   {
+                       "resource":  "reports",
+                       "method":  "GET",
+                       "path":  "/v1/tenant/reports/{reportId}/messages",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN",
+                                     "AGENT"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "reports",
+                       "method":  "POST",
+                       "path":  "/v1/tenant/reports/message",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN",
+                                     "AGENT"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "reports",
+                       "method":  "PATCH",
+                       "path":  "/v1/tenant/reports/{reportId}/status",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN",
+                                     "AGENT"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "resource":  "reports",
+                       "method":  "POST",
+                       "path":  "/v1/tenant/reports",
+                       "expected":  true,
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN",
+                                     "AGENT"
+                                 ],
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/case-policy",
+                       "method":  "GET",
+                       "resource":  "case-policy",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/case-policy",
+                       "method":  "PUT",
+                       "resource":  "case-policy",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN",
+                                     "AGENT"
+                                 ],
+                       "path":  "/v1/tenant/templates",
+                       "method":  "GET",
+                       "resource":  "templates",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/templates",
+                       "method":  "POST",
+                       "resource":  "templates",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/templates/{id}",
+                       "method":  "PATCH",
+                       "resource":  "templates",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/templates/{id}",
+                       "method":  "DELETE",
+                       "resource":  "templates",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/billing/profile",
+                       "method":  "GET",
+                       "resource":  "billing",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/billing/profile",
+                       "method":  "PUT",
+                       "resource":  "billing",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/subscription",
+                       "method":  "GET",
+                       "resource":  "billing",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/subscription",
+                       "method":  "PUT",
+                       "resource":  "billing",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/payment-method",
+                       "method":  "GET",
+                       "resource":  "billing",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/payment-method",
+                       "method":  "PUT",
+                       "resource":  "billing",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   },
+                   {
+                       "implemented":  true,
+                       "roles":  [
+                                     "ADMIN"
+                                 ],
+                       "path":  "/v1/tenant/users/{id}/role",
+                       "method":  "PATCH",
+                       "resource":  "users",
+                       "expected":  true,
+                       "dto_issues":  [
+
+                                      ]
+                   }
+               ],
+    "dto_issues_summary":  {
+                               "total":  3
+                           },
+    "tenant_scoping":  {
+                           "services_missing_tenant_filter":  null
+                       },
+    "prisma_models":  {
+                          "Department":  "ok",
+                          "Category":  "ok",
+                          "Template":  "ok",
+                          "TemplateQuestion":  "ok",
+                          "CasePolicy":  "ok",
+                          "BillingProfile":  "ok",
+                          "Subscription":  "ok",
+                          "PaymentMethod":  "ok",
+                          "ReportStatusHistory":  "ok"
+                      },
+    "rate_limit":  {
+                       "login_mfa_refresh_logout_429":  true,
+                       "retry_after":  true
+                   },
+    "stats_endpoint":  {
+                           "present":  true
+                       },
+    "priority_fixes":  [
+                           "None immediate for Admin; next: refine PublicUser scoping and enhance stats"
+                       ]
+}

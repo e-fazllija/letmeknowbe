@@ -1,24 +1,137 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
   output   = "../src/generated/public"
 }
- 
+
 datasource db {
   provider = "postgresql"
-  url      = env("PUBLIC_DATABASE_URL") // es: postgresql://postgres:password@localhost:5432/whistledb_INTENT
+  url      = env("PUBLIC_DATABASE_URL")
+}
+
+model Client {
+  id                  String         @id @default(cuid())
+  companyName         String
+  contactEmail        String
+  employeeRange       EmployeeRange
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  billingAddressLine1 String
+  billingCity         String
+  billingCountry      String
+  billingEmail        String
+  billingPec          String?
+  billingProvince     String
+  billingSdiCode      String?
+  billingTaxId        String         @unique
+  billingZip          String
+  status              ClientStatus   @default(ACTIVE)
+  stripeCustomerId    String?        @unique
+  activatedAt         DateTime?
+  payments            Payment[]
+  subscriptions       Subscription[]
+
+  @@index([companyName])
+}
+
+model SubscriptionPlan {
+  id                   String         @id @default(cuid())
+  name                 String
+  description          String?
+  price                Decimal        @db.Decimal(10, 2)
+  currency             String         @default("EUR")
+  billingCycle         BillingCycle   @default(ANNUALE)
+  active               Boolean        @default(true)
+  stripeProductId      String?
+  stripePriceOneShotId String?
+  stripePriceSemiId    String?
+  stripePriceQuarterId String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  subscriptions        Subscription[]
+}
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  clientId             String
+  amount               Decimal            @db.Decimal(10, 2)
+  currency             String             @default("EUR")
+  createdAt            DateTime           @default(now())
+  contractTerm         ContractTerm?
+  nextBillingAt        DateTime?
+  startsAt             DateTime           @default(now())
+  status               SubscriptionStatus @default(ACTIVE)
+  endsAt               DateTime?
+  installmentPlan      InstallmentPlan    @default(ONE_SHOT)
+  lastPaymentId        String?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?            @unique
+  subscriptionPlanId   String
+  updatedAt            DateTime           @updatedAt
+  firstPaidAt          DateTime?
+  payments             Payment[]
+  client               Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  lastPayment          Payment?           @relation("SubscriptionLastPayment", fields: [lastPaymentId], references: [id])
+  plan                 SubscriptionPlan   @relation(fields: [subscriptionPlanId], references: [id])
+
+  @@index([clientId])
+}
+
+model Payment {
+  id                    String         @id @default(cuid())
+  clientId              String
+  subscriptionId        String?
+  amount                Decimal        @db.Decimal(10, 2)
+  currency              String         @default("EUR")
+  status                PaymentStatus  @default(PENDING)
+  method                PaymentMethod
+  dueDate               DateTime?
+  paymentDate           DateTime?
+  transactionId         String?
+  notes                 String?
+  stripePaymentIntentId String?
+  stripeInvoiceId       String?
+  stripeChargeId        String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  client                Client         @relation(fields: [clientId], references: [id])
+  subscription          Subscription?  @relation(fields: [subscriptionId], references: [id])
+  lastPaymentOf         Subscription[] @relation("SubscriptionLastPayment")
+
+  @@index([clientId])
+  @@index([subscriptionId])
+  @@index([stripePaymentIntentId])
+}
+
+model StripeWebhookEvent {
+  id          String    @id @default(cuid())
+  eventId     String    @unique
+  type        String
+  data        String?
+  receivedAt  DateTime  @default(now())
+  processed   Boolean   @default(false)
+  processedAt DateTime?
+  error       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([type, processed])
+}
+
+model JobLock {
+  jobName     String   @id
+  lockedUntil DateTime?
+  owner       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("job_lock")
 }
 
 enum PaymentMethod {
   CARTA
   BONIFICO
 }
- 
+
 enum EmployeeRange {
   DA_0_A_50
   DA_51_A_100
@@ -28,73 +141,41 @@ enum EmployeeRange {
   OLTRE_250
 }
 
-// NEW: stato cliente
 enum ClientStatus {
   ACTIVE
   SUSPENDED
   ARCHIVED
+  PENDING_PAYMENT
 }
 
-// NEW: ciclo di fatturazione
 enum BillingCycle {
   MENSILE
   ANNUALE
 }
 
-// NEW: durata contrattuale
 enum ContractTerm {
   ONE_YEAR
   THREE_YEARS
 }
 
-// NEW: stato abbonamento
 enum SubscriptionStatus {
   ACTIVE
   TRIALING
   PAST_DUE
   CANCELED
   EXPIRED
+  PENDING_PAYMENT
 }
 
-// CLIENT (azienda)
-model Client {
-  id            String          @id @default(cuid())
-  companyName   String
-  contactEmail  String
-  status        ClientStatus    @default(ACTIVE)
-  employeeRange EmployeeRange
-  subscriptions Subscription[]
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
-
-  // Billing fields (fonte di verità in PUBLIC)
-  billingTaxId        String      @unique
-  billingEmail        String
-  billingPec          String?
-  billingSdiCode      String?
-  billingAddressLine1 String
-  billingZip          String
-  billingCity         String
-  billingProvince     String
-  billingCountry      String
-
-  @@index([companyName])
+enum InstallmentPlan {
+  ONE_SHOT
+  SEMESTRALE
+  TRIMESTRALE
 }
 
-// ABBONAMENTI
-model Subscription {
-  id        String           @id @default(cuid())
-  clientId  String
-  client    Client           @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  amount    Decimal          @db.Decimal(10,2)
-  currency  String           @default("EUR")
-  billingCycle BillingCycle
-  contractTerm ContractTerm
-  method       PaymentMethod
-  status       SubscriptionStatus @default(ACTIVE)
-  startsAt     DateTime           @default(now())
-  nextBillingAt DateTime?
-  trialEndsAt   DateTime?
-  canceledAt    DateTime?
-  createdAt    DateTime           @default(now())
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
 }
